@@ -207,7 +207,7 @@ def _classify_stremthru(line: str) -> tuple[str, str] | None:
             return "warning", "stremthru"
         if lvl in ("FATAL", "PANIC"):
             return "error", "stremthru"
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError, TypeError:
         pass
     # Fallback plain-text
     if re.search(r'"level"\s*:\s*"(ERROR|FATAL|PANIC)"', line):

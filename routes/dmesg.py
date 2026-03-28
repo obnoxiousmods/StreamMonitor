@@ -12,7 +12,7 @@ async def api_dmesg(request: Request):
     """Return recent kernel log lines via journalctl -k."""
     try:
         lines = min(int(request.query_params.get("lines", "100")), 500)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         lines = 100
 
     try:

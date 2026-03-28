@@ -46,7 +46,7 @@ def check_pw(username: str, password: str) -> bool:
         return False
     try:
         return ph.verify(ADMIN_HASH[0], password)
-    except (VerifyMismatchError, Exception):
+    except VerifyMismatchError, Exception:
         return False
 
 

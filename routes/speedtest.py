@@ -52,7 +52,7 @@ async def speedtest_download(request: Request):
 
     try:
         mb = min(int(request.query_params.get("mb", "25")), _MAX_MB)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         mb = 25
 
     total_bytes = mb * 1024 * 1024
