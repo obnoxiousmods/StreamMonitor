@@ -1,0 +1,14 @@
+[project]
+name = "streammonitor"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.14"
+dependencies = [
+    "argon2-cffi>=25.1.0",
+    "httpx[http2]>=0.28.1",
+    "itsdangerous>=2.2.0",
+    "psutil>=7.2.2",
+    "python-multipart>=0.0.22",
+    "starlette>=1.0.0",
+    "uvicorn[standard]>=0.42.0",
+]
