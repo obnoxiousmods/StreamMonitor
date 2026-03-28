@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import secrets
 import time
@@ -27,6 +28,7 @@ from starlette.templating import Jinja2Templates
 import config as cfg
 import errors as _errors
 import health as _health
+import logging_config  # noqa: F401 — side-effect import
 import perms as _perms
 import stats as _stats
 from routes.benchmark import TITLES as BENCH_TITLES
@@ -35,6 +37,8 @@ from routes.dmesg import api_dmesg
 from routes.jellyfin import api_jellyfin
 from routes.public import api_public
 from routes.speedtest import speedtest_download, speedtest_page
+
+logger = logging.getLogger(__name__)
 
 _BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_BASE_DIR / "templates"))
@@ -125,9 +129,12 @@ async def login(request: Request):
     if request.method == "POST":
         try:
             f = await request.form()
-            if check_pw(str(f.get("username", "")), str(f.get("password", ""))):
+            username = str(f.get("username", ""))
+            if check_pw(username, str(f.get("password", ""))):
                 request.session["user"] = "admin"
+                logger.info(f"Login succeeded for user {username!r} from {request.client.host}")
                 return RedirectResponse("/", status_code=303)
+            logger.info(f"Login failed for user {username!r} from {request.client.host}")
             err = "Invalid credentials"
         except Exception:
             err = "Login error — try again"
@@ -252,7 +259,7 @@ async def api_logs(request: Request):
         out, err = await asyncio.wait_for(p.communicate(), timeout=15)
         lines = out.decode(errors="replace").splitlines()
         if not lines and err:
-            lines = ["[journalctl] " + err.decode(errors="replace").strip()]
+            lines = [f"[journalctl] {err.decode(errors='replace').strip()}"]
         return JSONResponse({"unit": unit, "lines": lines})
     except TimeoutError:
         return JSONResponse({"error": "timeout"}, status_code=504)
@@ -285,6 +292,7 @@ async def api_settings_keys_post(request: Request):
             attr = cfg.KEY_REGISTRY[k]["attr"]
             if hasattr(cfg, attr):
                 setattr(cfg, attr, v)
+        logger.info(f"API keys saved: {', '.join(safe.keys())}")
         return JSONResponse({"ok": True, "updated": len(safe)})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -302,6 +310,7 @@ async def api_settings_password(request: Request):
             return JSONResponse({"error": "Current password incorrect"}, status_code=403)
         new_hash = ph.hash(new_pw)
         _save_hash(new_hash)
+        logger.info("Admin password changed successfully")
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -309,7 +318,7 @@ async def api_settings_password(request: Request):
 
 @require_auth
 async def api_perms_scan(request: Request):
-    results = await asyncio.get_event_loop().run_in_executor(None, _perms.scan_perms)
+    results = await asyncio.get_running_loop().run_in_executor(None, _perms.scan_perms)
     return JSONResponse({"results": results, "ts": time.time()})
 
 
@@ -367,6 +376,51 @@ async def api_settings_keys(request: Request):
     return await api_settings_keys_post(request)
 
 
+@require_auth
+async def api_settings_urls_get(request: Request):
+    result = {}
+    for k, meta in cfg.URL_REGISTRY.items():
+        attr = meta["attr"]
+        val = getattr(cfg, attr, "") or ""
+        result[k] = {"label": meta["label"], "value": val, "group": meta.get("group", "Other")}
+    return JSONResponse(result)
+
+
+@require_auth
+async def api_settings_urls_post(request: Request):
+    try:
+        updates = await request.json()
+        if not isinstance(updates, dict):
+            return JSONResponse({"error": "invalid body"}, status_code=400)
+        # Only allow known URL keys
+        safe: dict[str, str] = {}
+        invalid: list[str] = []
+        for k, v in updates.items():
+            if k not in cfg.URL_REGISTRY:
+                continue
+            v = str(v).strip().rstrip("/")
+            if not v:
+                safe[k] = v
+                continue
+            if not cfg.is_valid_url(v):
+                invalid.append(k)
+                continue
+            safe[k] = v
+        if invalid:
+            labels = [cfg.URL_REGISTRY[k]["label"] for k in invalid]
+            return JSONResponse({"error": f"Invalid URL(s): {', '.join(labels)}"}, status_code=400)
+        cfg.save_urls(safe)
+        return JSONResponse({"ok": True, "updated": len(safe)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def api_settings_urls(request: Request):
+    if request.method == "GET":
+        return await api_settings_urls_get(request)
+    return await api_settings_urls_post(request)
+
+
 # ── Service control ────────────────────────────────────────────────────────────
 _ALLOWED_UNITS = {c["unit"] for c in cfg.SERVICES.values() if c.get("unit")}
 
@@ -390,7 +444,10 @@ async def api_service_action(request: Request):
         )
         _out, err = await asyncio.wait_for(p.communicate(), timeout=30)
         if p.returncode == 0:
+            logger.info(f"Service action {action} on unit {unit} succeeded")
             return JSONResponse({"ok": True})
+        err_msg = err.decode().strip()[:200]
+        logger.warning(f"Service action {action} on unit {unit} failed: {err_msg}")
         return JSONResponse({"error": err.decode().strip()[:300]}, status_code=500)
     except TimeoutError:
         return JSONResponse({"error": "systemctl timed out"}, status_code=504)
@@ -418,6 +475,7 @@ app = Starlette(
         Route("/api/errors", api_errors, methods=["GET", "DELETE"]),
         Route("/api/errors/scan", api_errors_scan, methods=["POST"]),
         Route("/api/settings/keys", api_settings_keys, methods=["GET", "POST"]),
+        Route("/api/settings/urls", api_settings_urls, methods=["GET", "POST"]),
         Route("/api/settings/password", api_settings_password, methods=["POST"]),
         Route("/api/benchmark", require_auth(api_benchmark)),
         Route("/api/jellyfin", require_auth(api_jellyfin)),

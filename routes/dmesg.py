@@ -29,7 +29,7 @@ async def api_dmesg(request: Request):
         out, err = await asyncio.wait_for(p.communicate(), timeout=15)
         result_lines = out.decode(errors="replace").splitlines()
         if not result_lines and err:
-            result_lines = ["[journalctl] " + err.decode(errors="replace").strip()]
+            result_lines = [f"[journalctl] {err.decode(errors='replace').strip()}"]
         return JSONResponse({"lines": result_lines})
     except TimeoutError:
         return JSONResponse({"error": "timeout"}, status_code=504)

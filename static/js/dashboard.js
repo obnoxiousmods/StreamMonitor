@@ -406,6 +406,7 @@ function initLogs(){
 
 // ── Settings ──
 let keysData={}, keysOriginal={};
+let urlsData={}, urlsOriginal={};
 function toggleKeyVis(k){
   const inp=document.getElementById('key_'+k);
   const btn=document.getElementById('eye_'+k);
@@ -427,10 +428,17 @@ function markChanged(k){
   if(!inp)return;
   inp.classList.toggle('changed', inp.value!==keysOriginal[k]);
 }
+function markUrlChanged(k){
+  const inp=document.getElementById('url_'+k);
+  if(!inp)return;
+  inp.classList.toggle('changed', inp.value!==urlsOriginal[k]);
+}
 async function loadSettings(){
   const g=document.getElementById('settings-grid');
   const keys=await safeJson('/api/settings/keys');
+  const urls=await safeJson('/api/settings/urls');
   if(keys){keysData=keys; keysOriginal=Object.fromEntries(Object.entries(keys).map(([k,v])=>[k,v.value||'']));}
+  if(urls){urlsData=urls; urlsOriginal=Object.fromEntries(Object.entries(urls).map(([k,v])=>[k,v.value||'']));}
   // Group keys
   const groups={};
   for(const [k,v] of Object.entries(keys||{})){
@@ -438,7 +446,7 @@ async function loadSettings(){
     if(!groups[gr])groups[gr]=[];
     groups[gr].push([k,v]);
   }
-  const groupOrder=['Arr Suite','Indexers','Media Servers','Streaming','Dispatching','Other'];
+  const groupOrder=['Arr Suite','Indexers','Media Servers','Streaming','Dispatching','Downloads','Other'];
   const sorted=groupOrder.filter(g=>groups[g]).concat(Object.keys(groups).filter(g=>!groupOrder.includes(g)));
   const keysHtml=sorted.map(gr=>`
     <div class="key-group">
@@ -453,12 +461,38 @@ async function loadSettings(){
         </div>
       </div>`).join('')}
     </div>`).join('');
+  // Group URLs
+  const urlGroups={};
+  for(const [k,v] of Object.entries(urls||{})){
+    const gr=v.group||'Other';
+    if(!urlGroups[gr])urlGroups[gr]=[];
+    urlGroups[gr].push([k,v]);
+  }
+  const urlGroupOrder=['Streaming','Indexers','Arr Suite','Media Servers','Dispatching','Downloads','Other'];
+  const urlSorted=urlGroupOrder.filter(g=>urlGroups[g]).concat(Object.keys(urlGroups).filter(g=>!urlGroupOrder.includes(g)));
+  const urlsHtml=urlSorted.map(gr=>`
+    <div class="key-group">
+      <div class="key-group-label">${esc(gr)}</div>
+      ${urlGroups[gr].map(([k,v])=>`
+      <div class="key-row">
+        <label title="${esc(k)}">${esc(v.label)}</label>
+        <div class="key-input-wrap">
+          <input type="text" id="url_${esc(k)}" value="${esc(v.value||'')}" placeholder="http://127.0.0.1:..." oninput="markUrlChanged('${esc(k)}')">
+        </div>
+      </div>`).join('')}
+    </div>`).join('');
   g.innerHTML=`
   <div class="settings-sec">
     <h3>API Keys</h3>
     ${keysHtml}
     <button class="btn-save" onclick="saveKeys()">Save Keys</button>
     <div id="keys-msg"></div>
+  </div>
+  <div class="settings-sec">
+    <h3>Service URLs</h3>
+    ${urlsHtml}
+    <button class="btn-save" onclick="saveUrls()">Save URLs</button>
+    <div id="urls-msg"></div>
   </div>
   <div class="settings-sec">
     <h3>Admin Password</h3>
@@ -483,6 +517,19 @@ async function saveKeys(){
   if(r?.ok){msg.className='msg-ok';msg.textContent='Saved!';}
   else{msg.className='msg-err';msg.textContent='Error saving keys.';}
   setTimeout(()=>{msg.textContent='';},3000);
+}
+
+async function saveUrls(){
+  const updates={};
+  for(const k of Object.keys(urlsData)){
+    const el=document.getElementById('url_'+k);
+    if(el)updates[k]=el.value.trim();
+  }
+  const msg=document.getElementById('urls-msg');
+  const r=await safeJson('/api/settings/urls',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(updates)});
+  if(r?.ok){msg.className='msg-ok';msg.textContent='URLs saved!';urlsOriginal=Object.fromEntries(Object.entries(urlsData).map(([k])=>[k,updates[k]||'']));document.querySelectorAll('[id^="url_"]').forEach(el=>el.classList.remove('changed'));}
+  else{msg.className='msg-err';msg.textContent=r?.error||'Error saving URLs.';}
+  setTimeout(()=>{msg.textContent='';},4000);
 }
 
 async function changePassword(){

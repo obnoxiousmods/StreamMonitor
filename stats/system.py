@@ -68,10 +68,8 @@ def _collect_system_sync() -> dict:
         result["os_name"] = platform.system()
         result["os_release"] = platform.release()
         osr = Path("/etc/os-release")
-        if osr.exists():
-            m = re.search(r'^PRETTY_NAME="([^"]+)"', osr.read_text(), re.MULTILINE)
-            if m:
-                result["os_distro"] = m.group(1)
+        if osr.exists() and (m := re.search(r'^PRETTY_NAME="([^"]+)"', osr.read_text(), re.MULTILINE)):
+            result["os_distro"] = m.group(1)
     except Exception:
         pass
 
@@ -91,8 +89,7 @@ def _collect_system_sync() -> dict:
                 cpu["freq_max_mhz"] = round(freq.max)
             try:
                 txt = Path("/proc/cpuinfo").read_text()
-                m = re.search(r"model name\s*:\s*(.+)", txt)
-                if m:
+                if m := re.search(r"model name\s*:\s*(.+)", txt):
                     cpu["model"] = m.group(1).strip()
             except Exception:
                 pass
@@ -249,38 +246,29 @@ def _collect_system_sync() -> dict:
 
         gpu["name"] = "AMD Radeon RX 580"
 
-        v = _sysfs(f"{base}/gpu_busy_percent")
-        if v is not None:
+        if (v := _sysfs(f"{base}/gpu_busy_percent")) is not None:
             gpu["usage_pct"] = int(v)
 
-        v = _sysfs(f"{base}/mem_busy_percent")
-        if v is not None:
+        if (v := _sysfs(f"{base}/mem_busy_percent")) is not None:
             gpu["mem_busy_pct"] = int(v)
 
-        vt = _sysfs(f"{base}/mem_info_vram_total")
-        vu = _sysfs(f"{base}/mem_info_vram_used")
-        if vt and vu:
+        if (vt := _sysfs(f"{base}/mem_info_vram_total")) and (vu := _sysfs(f"{base}/mem_info_vram_used")):
             gpu["vram_total_mb"] = round(int(vt) / 1024**2)
             gpu["vram_used_mb"] = round(int(vu) / 1024**2)
 
-        v = _sysfs(f"{hwmon}/temp1_input")
-        if v:
+        if v := _sysfs(f"{hwmon}/temp1_input"):
             gpu["temp_c"] = round(int(v) / 1000)
 
-        v = _sysfs(f"{hwmon}/power1_input")
-        if v:
+        if v := _sysfs(f"{hwmon}/power1_input"):
             gpu["power_w"] = round(int(v) / 1_000_000)
 
-        v = _sysfs(f"{hwmon}/fan1_input")
-        if v:
+        if v := _sysfs(f"{hwmon}/fan1_input"):
             gpu["fan_rpm"] = int(v)
 
-        v = _sysfs(f"{hwmon}/freq1_input")
-        if v:
+        if v := _sysfs(f"{hwmon}/freq1_input"):
             gpu["core_mhz"] = round(int(v) / 1_000_000)
 
-        v = _sysfs(f"{hwmon}/freq2_input")
-        if v:
+        if v := _sysfs(f"{hwmon}/freq2_input"):
             gpu["mem_mhz"] = round(int(v) / 1_000_000)
 
         if gpu:
@@ -344,5 +332,4 @@ def _collect_system_sync() -> dict:
 
 
 async def collect_system() -> dict:
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _collect_system_sync)
+    return await asyncio.get_running_loop().run_in_executor(None, _collect_system_sync)

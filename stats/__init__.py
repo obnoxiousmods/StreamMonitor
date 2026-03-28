@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from datetime import UTC, datetime
 
@@ -30,6 +31,8 @@ from stats.collectors import (
 )
 from stats.github import GITHUB_INTERVAL, refresh_github_versions
 from stats.system import collect_system
+
+logger = logging.getLogger(__name__)
 
 STATS_INTERVAL = 60  # seconds
 
@@ -64,10 +67,12 @@ async def _collect_one(sid: str) -> None:
     if not fn:
         return
     try:
+        logger.debug(f"Running collector for {sid}")
         data = await fn()
         service_stats[sid] = data or {}
         stats_updated_at[sid] = datetime.now(UTC).isoformat()
     except Exception:
+        logger.warning(f"Collector for {sid} failed", exc_info=True)
         service_stats.setdefault(sid, {})
 
 

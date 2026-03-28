@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import re
 import time
 from collections import deque
@@ -15,6 +16,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import config as cfg
+
+logger = logging.getLogger(__name__)
 
 SCAN_INTERVAL = 120  # seconds between scans
 MAX_ERRORS = 2000  # rolling history cap
@@ -61,8 +64,7 @@ def _extract_ts(journal_line: str, fallback: float) -> float:
     """Extract Unix timestamp from journalctl --output=short-iso prefix.
     Format: 2026-03-27T20:15:20+0000 hostname service[pid]: message
     """
-    m = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{4}|Z))", journal_line)
-    if m:
+    if m := re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{4}|Z))", journal_line):
         try:
             s = m.group(1)
             # Normalize: +0700 → +07:00, Z → +00:00
@@ -80,8 +82,7 @@ def _extract_ts(journal_line: str, fallback: float) -> float:
 
 def _classify_arrstack(line: str) -> tuple[str, str] | None:
     """Radarr / Sonarr / Lidarr / Prowlarr — NLog format: [Level] Component: msg"""
-    m = re.search(r"\[(Warn|Error|Fatal|Debug|Trace)\]", line, re.IGNORECASE)
-    if m:
+    if m := re.search(r"\[(Warn|Error|Fatal|Debug|Trace)\]", line, re.IGNORECASE):
         lvl = m.group(1).lower()
         if lvl in ("error", "fatal"):
             return "error", "arrstack"
@@ -117,8 +118,7 @@ def _classify_comet(line: str) -> tuple[str, str] | None:
 
 def _classify_mediafusion(line: str) -> tuple[str, str] | None:
     """MediaFusion: LEVEL::date::path::line - message"""
-    m = re.match(r"^(ERROR|WARNING|CRITICAL|WARN|FATAL)::", line, re.IGNORECASE)
-    if m:
+    if m := re.match(r"^(ERROR|WARNING|CRITICAL|WARN|FATAL)::", line, re.IGNORECASE):
         lvl = m.group(1).upper()
         if lvl in ("ERROR", "CRITICAL", "FATAL"):
             return "error", "mediafusion"
@@ -133,8 +133,7 @@ def _classify_mediafusion(line: str) -> tuple[str, str] | None:
 
 def _classify_bazarr(line: str) -> tuple[str, str] | None:
     """Bazarr: 2026-03-27 19:08:34,364 - logger (threadid) : LEVEL (module:line) - msg"""
-    m = re.search(r":\s+(ERROR|WARNING|CRITICAL|WARN)\s+\(", line, re.IGNORECASE)
-    if m:
+    if m := re.search(r":\s+(ERROR|WARNING|CRITICAL|WARN)\s+\(", line, re.IGNORECASE):
         lvl = m.group(1).upper()
         if lvl in ("ERROR", "CRITICAL"):
             return "error", "bazarr"
@@ -146,8 +145,7 @@ def _classify_bazarr(line: str) -> tuple[str, str] | None:
 
 def _classify_jackett(line: str) -> tuple[str, str] | None:
     """Jackett: MM-DD HH:MM:SS Level Message  +  C# stack traces"""
-    m = re.match(r"\d{2}-\d{2} \d{2}:\d{2}:\d{2} (Error|Warn|Fatal|Debug|Info)", line, re.IGNORECASE)
-    if m:
+    if m := re.match(r"\d{2}-\d{2} \d{2}:\d{2}:\d{2} (Error|Warn|Fatal|Debug|Info)", line, re.IGNORECASE):
         lvl = m.group(1).lower()
         if lvl in ("error", "fatal"):
             return "error", "jackett"
@@ -166,8 +164,7 @@ def _classify_jackett(line: str) -> tuple[str, str] | None:
 
 def _classify_jellyfin(line: str) -> tuple[str, str] | None:
     """Jellyfin: [HH:MM:SS] [INF/ERR/WRN/CRT] message"""
-    m = re.search(r"\[(ERR|WRN|CRT|FTL)\]", line, re.IGNORECASE)
-    if m:
+    if m := re.search(r"\[(ERR|WRN|CRT|FTL)\]", line, re.IGNORECASE):
         lvl = m.group(1).upper()
         if lvl in ("ERR", "CRT", "FTL"):
             return "error", "jellyfin"
@@ -181,8 +178,7 @@ def _classify_jellyfin(line: str) -> tuple[str, str] | None:
 
 def _classify_zilean(line: str) -> tuple[str, str] | None:
     """Zilean: [HH:MM:SS] | LEVEL | "ClassName" | message"""
-    m = re.search(r"\|\s*(WARN|ERR|CRIT|ERROR|FATAL)\s*\|", line, re.IGNORECASE)
-    if m:
+    if m := re.search(r"\|\s*(WARN|ERR|CRIT|ERROR|FATAL)\s*\|", line, re.IGNORECASE):
         lvl = m.group(1).upper()
         if lvl in ("ERR", "ERROR", "CRIT", "FATAL"):
             return "error", "zilean"
@@ -211,7 +207,7 @@ def _classify_stremthru(line: str) -> tuple[str, str] | None:
             return "warning", "stremthru"
         if lvl in ("FATAL", "PANIC"):
             return "error", "stremthru"
-    except json.JSONDecodeError, TypeError:
+    except (json.JSONDecodeError, TypeError):
         pass
     # Fallback plain-text
     if re.search(r'"level"\s*:\s*"(ERROR|FATAL|PANIC)"', line):
@@ -228,8 +224,7 @@ def _classify_aiostreams(line: str) -> tuple[str, str] | None:
     if re.search(r"🟡|\|\s*WARN(ING)?\s*\|", line):
         return "warning", "aiostreams"
     # "errors" count in stream response (non-zero)
-    m = re.search(r"(\d+) errors?", line, re.IGNORECASE)
-    if m and int(m.group(1)) > 0 and "Returning" in line:
+    if (m := re.search(r"(\d+) errors?", line, re.IGNORECASE)) and int(m.group(1)) > 0 and "Returning" in line:
         return "warning", "aiostreams"
     if re.search(r"\b(Error|Exception|Unhandled|crash)\b", line, re.IGNORECASE):
         return "error", "aiostreams"
@@ -238,8 +233,7 @@ def _classify_aiostreams(line: str) -> tuple[str, str] | None:
 
 def _classify_dispatcharr(line: str) -> tuple[str, str] | None:
     """Dispatcharr (Django): YYYY-MM-DD HH:MM:SS,ms LEVEL logger message"""
-    m = re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ (ERROR|WARNING|CRITICAL|WARN)\b", line, re.IGNORECASE)
-    if m:
+    if m := re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ (ERROR|WARNING|CRITICAL|WARN)\b", line, re.IGNORECASE):
         lvl = m.group(1).upper()
         if lvl in ("ERROR", "CRITICAL"):
             return "error", "dispatcharr"
@@ -251,8 +245,7 @@ def _classify_dispatcharr(line: str) -> tuple[str, str] | None:
 
 def _classify_flaresolverr(line: str) -> tuple[str, str] | None:
     """FlareSolverr: YYYY-MM-DD HH:MM:SS LEVEL message"""
-    m = re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (ERROR|WARNING|CRITICAL)\b", line, re.IGNORECASE)
-    if m:
+    if m := re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (ERROR|WARNING|CRITICAL)\b", line, re.IGNORECASE):
         lvl = m.group(1).upper()
         if lvl in ("ERROR", "CRITICAL"):
             return "error", "flaresolverr"
@@ -501,6 +494,7 @@ async def scan_all() -> int:
 
     last_scan_ts = scan_time
     scan_count += 1
+    logger.info(f"Error scan #{scan_count} completed: {new_count} new errors/warnings found")
     return new_count
 
 

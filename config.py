@@ -6,6 +6,11 @@ import json
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlparse
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env")
 
 # ── Key store (loaded at import, mutated at runtime via /api/settings/keys) ──
 _KEY_FILE = Path(__file__).parent / "data" / "apikeys.json"
@@ -104,40 +109,160 @@ KEY_REGISTRY: dict[str, dict] = {
     "qbt_user": {"label": "qBittorrent Username", "attr": "QBT_USER", "group": "Downloads"},
 }
 
+# URLs surfaced in the Settings UI
+URL_REGISTRY: dict[str, dict] = {
+    "comet_url": {"label": "Comet", "attr": "COMET_URL", "group": "Streaming"},
+    "mediafusion_url": {"label": "MediaFusion", "attr": "MEDIAFUSION_URL", "group": "Streaming"},
+    "stremthru_url": {"label": "StremThru", "attr": "STREMTHRU_URL", "group": "Streaming"},
+    "zilean_url": {"label": "Zilean", "attr": "ZILEAN_URL", "group": "Streaming"},
+    "aiostreams_url": {"label": "AIOStreams", "attr": "AIOSTREAMS_URL", "group": "Streaming"},
+    "jackett_url": {"label": "Jackett", "attr": "JACKETT_URL", "group": "Indexers"},
+    "prowlarr_url": {"label": "Prowlarr", "attr": "PROWLARR_URL", "group": "Indexers"},
+    "flaresolverr_url": {"label": "FlareSolverr", "attr": "FLARESOLVERR_URL", "group": "Indexers"},
+    "byparr_url": {"label": "Byparr", "attr": "BYPARR_URL", "group": "Indexers"},
+    "radarr_url": {"label": "Radarr", "attr": "RADARR_URL", "group": "Arr Suite"},
+    "sonarr_url": {"label": "Sonarr", "attr": "SONARR_URL", "group": "Arr Suite"},
+    "lidarr_url": {"label": "Lidarr", "attr": "LIDARR_URL", "group": "Arr Suite"},
+    "bazarr_url": {"label": "Bazarr", "attr": "BAZARR_URL", "group": "Arr Suite"},
+    "jellyfin_url": {"label": "Jellyfin", "attr": "JELLYFIN_URL", "group": "Media Servers"},
+    "plex_url": {"label": "Plex", "attr": "PLEX_URL", "group": "Media Servers"},
+    "jellyseerr_url": {"label": "Jellyseerr", "attr": "JELLYSEERR_URL", "group": "Media Servers"},
+    "dispatcharr_url": {"label": "Dispatcharr", "attr": "DISPATCHARR_URL", "group": "Dispatching"},
+    "dispatcharr_api_url": {
+        "label": "Dispatcharr API",
+        "attr": "DISPATCHARR_API_URL",
+        "group": "Dispatching",
+    },
+    "mediaflow_url": {"label": "MediaFlow Proxy", "attr": "MEDIAFLOW_URL", "group": "Dispatching"},
+    "qbittorrent_url": {"label": "qBittorrent", "attr": "QBITTORRENT_URL", "group": "Downloads"},
+}
+
+# Maps service IDs to (URL attr, health-check path suffix) for URL rebuilds.
+_SERVICE_URL_PATHS: dict[str, tuple[str, str]] = {
+    "comet": ("COMET_URL", "/manifest.json"),
+    "mediafusion": ("MEDIAFUSION_URL", "/health"),
+    "stremthru": ("STREMTHRU_URL", "/v0/health"),
+    "zilean": ("ZILEAN_URL", "/healthchecks/ping"),
+    "aiostreams": ("AIOSTREAMS_URL", "/stremio/manifest.json"),
+    "jackett": ("JACKETT_URL", None),  # special — rebuilt in get_live_headers
+    "prowlarr": ("PROWLARR_URL", "/api/v1/system/status"),
+    "flaresolverr": ("FLARESOLVERR_URL", "/health"),
+    "byparr": ("BYPARR_URL", "/"),
+    "radarr": ("RADARR_URL", "/api/v3/system/status"),
+    "sonarr": ("SONARR_URL", "/api/v3/system/status"),
+    "lidarr": ("LIDARR_URL", "/api/v1/system/status"),
+    "bazarr": ("BAZARR_URL", "/api/system/status"),
+    "jellyfin": ("JELLYFIN_URL", "/System/Info/Public"),
+    "plex": ("PLEX_URL", "/identity"),
+    "jellyseerr": ("JELLYSEERR_URL", "/api/v1/status"),
+    "dispatcharr": ("DISPATCHARR_URL", "/"),
+    "mediaflow": ("MEDIAFLOW_URL", "/health"),
+    "qbittorrent": ("QBITTORRENT_URL", "/"),
+}
+
+
+def _rebuild_service_urls() -> None:
+    """Rebuild SERVICES health-check URLs and WEB_URLS from current module attrs."""
+    for sid, (attr, path) in _SERVICE_URL_PATHS.items():
+        base = globals().get(attr, "")
+        if not base:
+            continue
+        if sid == "jackett":
+            key_val = globals().get("JACKETT_KEY", "")
+            SERVICES[sid]["url"] = f"{base}/api/v2.0/indexers/all/results?apikey={key_val}&Query=health&Limit=1"
+        elif path is not None:
+            SERVICES[sid]["url"] = f"{base}{path}"
+        # Update WEB_URLS
+        if sid == "plex":
+            WEB_URLS[sid] = f"{base}/web"
+        elif sid in WEB_URLS:
+            WEB_URLS[sid] = base
+
+
+def save_urls(updates: dict[str, str]) -> None:
+    """Persist URL updates to data/urls.json and update live module attrs + SERVICES."""
+    global _stored_urls
+    _URL_FILE.parent.mkdir(exist_ok=True)
+    try:
+        current = json.loads(_URL_FILE.read_text()) if _URL_FILE.exists() else {}
+    except Exception:
+        current = {}
+    current.update(updates)
+    _URL_FILE.write_text(json.dumps(current, indent=2))
+    _stored_urls = _load_urls()
+    # Update module-level URL attributes
+    for k, v in updates.items():
+        meta = URL_REGISTRY.get(k)
+        if meta:
+            attr = meta["attr"]
+            globals()[attr] = v
+    # Rebuild SERVICES dict URLs and WEB_URLS
+    _rebuild_service_urls()
+
+
+def is_valid_url(value: str) -> bool:
+    """Basic URL validation."""
+    try:
+        r = urlparse(value)
+        return r.scheme in ("http", "https") and bool(r.netloc)
+    except Exception:
+        return False
+
+
 # Try to read Plex token from Preferences.xml
 PLEX_PREFS_PATH = os.environ.get("PLEX_PREFS_PATH", "/var/lib/plex/Plex Media Server/Preferences.xml")
 if not PLEX_TOKEN:
     try:
         _plex_prefs = Path(PLEX_PREFS_PATH)
-        if _plex_prefs.exists():
-            m = re.search(r'PlexOnlineToken="([^"]+)"', _plex_prefs.read_text())
-            if m:
-                PLEX_TOKEN = m.group(1)
+        if _plex_prefs.exists() and (m := re.search(r'PlexOnlineToken="([^"]+)"', _plex_prefs.read_text())):
+            PLEX_TOKEN = m.group(1)
     except Exception:
         pass
 
+# ── URL store (loaded at import, mutated at runtime via /api/settings/urls) ──
+_URL_FILE = Path(__file__).parent / "data" / "urls.json"
+
+
+def _load_urls() -> dict[str, str]:
+    """Load saved URLs from data/urls.json."""
+    try:
+        if _URL_FILE.exists():
+            return json.loads(_URL_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+_stored_urls = _load_urls()
+
+
+def _url(env_var: str, registry_key: str, default: str) -> str:
+    """Resolve a URL: env var > saved urls.json > default."""
+    return os.environ.get(env_var) or _stored_urls.get(registry_key) or default
+
+
 # ── Service Base URLs ────────────────────────────────────────────────────────
-# Override any of these via environment variables.
-COMET_URL = os.environ.get("COMET_URL", "http://127.0.0.1:8070")
-MEDIAFUSION_URL = os.environ.get("MEDIAFUSION_URL", "https://127.0.0.1:8090")
-STREMTHRU_URL = os.environ.get("STREMTHRU_URL", "http://127.0.0.1:8080")
-ZILEAN_URL = os.environ.get("ZILEAN_URL", "http://127.0.0.1:8181")
-AIOSTREAMS_URL = os.environ.get("AIOSTREAMS_URL", "http://127.0.0.1:7070")
-JACKETT_URL = os.environ.get("JACKETT_URL", "http://127.0.0.1:9117")
-PROWLARR_URL = os.environ.get("PROWLARR_URL", "http://127.0.0.1:9696")
-FLARESOLVERR_URL = os.environ.get("FLARESOLVERR_URL", "http://127.0.0.1:8191")
-BYPARR_URL = os.environ.get("BYPARR_URL", "http://127.0.0.1:8192")
-RADARR_URL = os.environ.get("RADARR_URL", "http://127.0.0.1:7878")
-SONARR_URL = os.environ.get("SONARR_URL", "http://127.0.0.1:8989")
-LIDARR_URL = os.environ.get("LIDARR_URL", "http://127.0.0.1:8686")
-BAZARR_URL = os.environ.get("BAZARR_URL", "http://127.0.0.1:6767")
-JELLYFIN_URL = os.environ.get("JELLYFIN_URL", "http://127.0.0.1:8096")
-PLEX_URL = os.environ.get("PLEX_URL", "http://127.0.0.1:32400")
-JELLYSEERR_URL = os.environ.get("JELLYSEERR_URL", "http://127.0.0.1:5055")
-DISPATCHARR_URL = os.environ.get("DISPATCHARR_URL", "http://127.0.0.1:8001")
-DISPATCHARR_API_URL = os.environ.get("DISPATCHARR_API_URL", "http://127.0.0.1:9191")
-MEDIAFLOW_URL = os.environ.get("MEDIAFLOW_URL", "http://127.0.0.1:8060")
-QBITTORRENT_URL = os.environ.get("QBITTORRENT_URL", "http://127.0.0.1:10000")
+# Override any of these via environment variables or the Settings UI.
+COMET_URL = _url("COMET_URL", "comet_url", "http://127.0.0.1:8070")
+MEDIAFUSION_URL = _url("MEDIAFUSION_URL", "mediafusion_url", "https://127.0.0.1:8090")
+STREMTHRU_URL = _url("STREMTHRU_URL", "stremthru_url", "http://127.0.0.1:8080")
+ZILEAN_URL = _url("ZILEAN_URL", "zilean_url", "http://127.0.0.1:8181")
+AIOSTREAMS_URL = _url("AIOSTREAMS_URL", "aiostreams_url", "http://127.0.0.1:7070")
+JACKETT_URL = _url("JACKETT_URL", "jackett_url", "http://127.0.0.1:9117")
+PROWLARR_URL = _url("PROWLARR_URL", "prowlarr_url", "http://127.0.0.1:9696")
+FLARESOLVERR_URL = _url("FLARESOLVERR_URL", "flaresolverr_url", "http://127.0.0.1:8191")
+BYPARR_URL = _url("BYPARR_URL", "byparr_url", "http://127.0.0.1:8192")
+RADARR_URL = _url("RADARR_URL", "radarr_url", "http://127.0.0.1:7878")
+SONARR_URL = _url("SONARR_URL", "sonarr_url", "http://127.0.0.1:8989")
+LIDARR_URL = _url("LIDARR_URL", "lidarr_url", "http://127.0.0.1:8686")
+BAZARR_URL = _url("BAZARR_URL", "bazarr_url", "http://127.0.0.1:6767")
+JELLYFIN_URL = _url("JELLYFIN_URL", "jellyfin_url", "http://127.0.0.1:8096")
+PLEX_URL = _url("PLEX_URL", "plex_url", "http://127.0.0.1:32400")
+JELLYSEERR_URL = _url("JELLYSEERR_URL", "jellyseerr_url", "http://127.0.0.1:5055")
+DISPATCHARR_URL = _url("DISPATCHARR_URL", "dispatcharr_url", "http://127.0.0.1:8001")
+DISPATCHARR_API_URL = _url("DISPATCHARR_API_URL", "dispatcharr_api_url", "http://127.0.0.1:9191")
+MEDIAFLOW_URL = _url("MEDIAFLOW_URL", "mediaflow_url", "http://127.0.0.1:8060")
+QBITTORRENT_URL = _url("QBITTORRENT_URL", "qbittorrent_url", "http://127.0.0.1:10000")
 
 # ── Data / File Paths ────────────────────────────────────────────────────────
 COMET_CHANGELOG = os.environ.get("COMET_CHANGELOG", "/home/comet/comet/CHANGELOG.md")
@@ -311,6 +436,38 @@ SERVICES: dict[str, dict] = {
     "redis": {"name": "Redis / Valkey", "unit": "valkey", "url": None, "category": "infra"},
     "system": {"name": "System", "unit": None, "url": None, "category": "system"},
 }
+
+# ── Dynamic header resolution ────────────────────────────────────────────────
+# Maps service IDs to their key attribute names for live header resolution.
+# This ensures health checks always use current key values, even after
+# keys are updated via the Settings UI at runtime.
+_SERVICE_KEY_ATTRS: dict[str, str] = {
+    "prowlarr": "PROWLARR_KEY",
+    "radarr": "RADARR_KEY",
+    "sonarr": "SONARR_KEY",
+    "lidarr": "LIDARR_KEY",
+    "bazarr": "BAZARR_KEY",
+    "jellyseerr": "JELLYSEERR_KEY",
+}
+
+
+def get_live_headers(sid: str) -> dict[str, str]:
+    """Return current headers for a service, resolving API keys at call time."""
+    base = dict(SERVICES.get(sid, {}).get("headers", {}))
+    key_attr = _SERVICE_KEY_ATTRS.get(sid)
+    if key_attr:
+        key_val = globals().get(key_attr, "")
+        if key_val:
+            base["X-Api-Key"] = key_val
+    # Jackett uses query param, not header — handle URL refresh
+    if sid == "jackett":
+        key_val = globals().get("JACKETT_KEY", "")
+        if key_val:
+            SERVICES["jackett"]["url"] = (
+                f"{JACKETT_URL}/api/v2.0/indexers/all/results?apikey={key_val}&Query=health&Limit=1"
+            )
+    return base
+
 
 # Web panel URLs for the frontend (may differ from API base URLs)
 WEB_URLS: dict[str, str] = {

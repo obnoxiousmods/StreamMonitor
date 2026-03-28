@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """StreamMonitor entry point."""
 
+from __future__ import annotations
+
 import uvicorn
 
 

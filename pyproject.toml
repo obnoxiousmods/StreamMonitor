@@ -9,6 +9,7 @@ dependencies = [
     "itsdangerous>=2.2.0",
     "jinja2>=3.1.6",
     "psutil>=7.2.2",
+    "python-dotenv>=1.0.0",
     "python-multipart>=0.0.22",
     "starlette>=1.0.0",
     "uvicorn[standard]>=0.42.0",
@@ -37,7 +38,7 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["config", "health", "stats", "errors", "perms", "routes"]
+known-first-party = ["config", "health", "logging_config", "stats", "errors", "perms", "routes"]
 
 [tool.ruff.format]
 quote-style = "double"

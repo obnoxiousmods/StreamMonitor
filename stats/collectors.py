@@ -38,8 +38,7 @@ async def _get_comet_session() -> str:
             if not cookie:
                 # try Set-Cookie header
                 sc = r.headers.get("set-cookie", "")
-                m = re.search(r"admin_session=([^;]+)", sc)
-                cookie = m.group(1) if m else ""
+                cookie = m.group(1) if (m := re.search(r"admin_session=([^;]+)", sc)) else ""
             if cookie:
                 _comet_session = cookie
                 _comet_session_expiry = time.monotonic() + 82800  # 23h
@@ -100,14 +99,12 @@ async def collect_comet() -> dict:
         global _comet_version
         if _comet_version is None:
             try:
-                with open(cfg.COMET_CHANGELOG) as f:
-                    for line in f:
-                        m = re.search(r"\[(\d+\.\d+\.\d+)\]", line)
-                        if m:
-                            _comet_version = m.group(1)
-                            break
+                for line in Path(cfg.COMET_CHANGELOG).read_text().splitlines():
+                    if m := re.search(r"\[(\d+\.\d+\.\d+)\]", line):
+                        _comet_version = m.group(1)
+                        break
             except Exception as e:
-                logging.debug("Could not read Comet CHANGELOG: %s", e)
+                logging.debug(f"Could not read Comet CHANGELOG: {e}")
                 _comet_version = ""
         result["version"] = _comet_version or manifest.get("version", "")
         result["types"] = manifest.get("types", [])
@@ -458,9 +455,9 @@ async def collect_zilean() -> dict:
             "-t",
             "-A",
             "-c",
-            "SELECT \"Resolution\", COUNT(*) FROM \"Torrents\""
+            'SELECT "Resolution", COUNT(*) FROM "Torrents"'
             " WHERE \"Resolution\" IN ('1080p','2160p','720p','480p','unknown')"
-            " GROUP BY \"Resolution\" ORDER BY COUNT(*) DESC;",
+            ' GROUP BY "Resolution" ORDER BY COUNT(*) DESC;',
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -881,13 +878,10 @@ async def collect_plex() -> dict:
             _get_raw(c, f"{base}/library/sections", h),
             return_exceptions=True,
         )
-    if isinstance(id_txt, str):
-        m = re.search(r'<MediaContainer[^>]+\sversion="([^"]+)"', id_txt)
-        if m:
-            result["version"] = m.group(1)
+    if isinstance(id_txt, str) and (m := re.search(r'<MediaContainer[^>]+\sversion="([^"]+)"', id_txt)):
+        result["version"] = m.group(1)
     if isinstance(sess_txt, str):
-        m = re.search(r'size="(\d+)"', sess_txt)
-        result["sessions_active"] = int(m.group(1)) if m else 0
+        result["sessions_active"] = int(m.group(1)) if (m := re.search(r'size="(\d+)"', sess_txt)) else 0
     if isinstance(sec_txt, str):
         try:
             tree = ET.fromstring(sec_txt)
@@ -979,8 +973,7 @@ async def _get_qbt_sid() -> str:
             sid = r.cookies.get("SID", "")
             if not sid:
                 sc = r.headers.get("set-cookie", "")
-                m = re.search(r"SID=([^;]+)", sc)
-                sid = m.group(1) if m else ""
+                sid = m.group(1) if (m := re.search(r"SID=([^;]+)", sc)) else ""
             if sid:
                 _qbt_sid = sid
                 _qbt_sid_expiry = time.monotonic() + 3600  # 1h
