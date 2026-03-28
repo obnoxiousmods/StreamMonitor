@@ -9,36 +9,84 @@
 <link rel="stylesheet" href="/static/css/login.css">
 </head><body>
 <div class="stars" id="stars"></div>
+<div class="grid-overlay"></div>
 <div class="wrapper">
-<div class="card">
-  <div class="dish"><span class="dish-icon">&#x1F4E1;</span></div>
+<div class="card" id="main-card">
+  <div class="card-border"></div>
+  <div class="card-inner">
+  <div class="section section-header" style="--delay:0">
+  <div class="dish">
+    <svg class="dish-icon-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="32" cy="44" r="5" fill="url(#icon-grad)"/>
+      <path d="M20 36a17 17 0 0 1 24 0" stroke="url(#icon-grad)" stroke-width="2.5" stroke-linecap="round" fill="none" class="arc arc-1"/>
+      <path d="M14 29a26 26 0 0 1 36 0" stroke="url(#icon-grad)" stroke-width="2.5" stroke-linecap="round" fill="none" class="arc arc-2"/>
+      <path d="M8 22a35 35 0 0 1 48 0" stroke="url(#icon-grad)" stroke-width="2.5" stroke-linecap="round" fill="none" class="arc arc-3"/>
+      <defs><linearGradient id="icon-grad" x1="0" y1="0" x2="64" y2="64"><stop stop-color="#818cf8"/><stop offset="1" stop-color="#c4b5fd"/></linearGradient></defs>
+    </svg>
+    <div class="pulse-ring"></div>
+  </div>
   <div class="title">StreamMonitor</div>
   <div class="subtitle">Infrastructure &amp; Streaming Stack</div>
+  <div class="version-badge">v0.1.0</div>
+  </div>
   {{ error_html|safe }}
+  <div class="section section-form" style="--delay:1">
   <form method="post">
-    <div class="field"><label>Username</label><input name="username" autocomplete="username" placeholder="admin" autofocus></div>
-    <div class="field"><label>Password</label><input name="password" type="password" placeholder="Enter password" autocomplete="current-password"></div>
-    <button class="btn" type="submit">Sign In</button>
+    <div class="field">
+      <label>Username</label>
+      <div class="input-wrap">
+        <svg class="input-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M10 10a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0H3z"/></svg>
+        <input name="username" autocomplete="username" placeholder="admin" autofocus>
+      </div>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <div class="input-wrap">
+        <svg class="input-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/></svg>
+        <input name="password" type="password" placeholder="Enter password" autocomplete="current-password">
+      </div>
+    </div>
+    <label class="remember-me">
+      <input type="checkbox" name="remember" value="1">
+      <span class="check-box"></span>
+      <span class="remember-label">Remember me</span>
+    </label>
+    <button class="btn" type="submit"><span class="btn-text">Sign In</span><span class="btn-shimmer"></span></button>
   </form>
+  </div>
   <div class="divider"></div>
+  <div class="section section-speed" style="--delay:2">
   <div class="speed-section">
     <h3>Speed Test</h3>
-    <div class="stest"><span class="name">{{ speedtest_direct_name }}</span><div class="sbar"><div class="fill" id="bf-d"></div></div><span class="sval" id="sv-d">&mdash;</span></div>
-    <div class="stest"><span class="name">{{ speedtest_cf_name }}</span><div class="sbar"><div class="fill" id="bf-c"></div></div><span class="sval" id="sv-c">&mdash;</span></div>
+    <div class="stest"><span class="name">{{ speedtest_direct_name }}<small class="endpoint-label" id="ep-d"></small></span><div class="sbar"><div class="fill" id="bf-d"></div></div><span class="sval" id="sv-d">&mdash;</span></div>
+    <div class="stest"><span class="name">{{ speedtest_cf_name }}<small class="endpoint-label" id="ep-c"></small></span><div class="sbar"><div class="fill" id="bf-c"></div></div><span class="sval" id="sv-c">&mdash;</span></div>
     <div class="speed-controls">
-      <select id="smb"><option value="10">10 MB</option><option value="25" selected>25 MB</option><option value="50">50 MB</option><option value="100">100 MB</option></select>
+      <select id="smb"><option value="10">10 MB</option><option value="25" selected>25 MB</option><option value="50">50 MB</option><option value="100">100 MB</option><option value="250">250 MB</option><option value="500">500 MB</option></select>
       <button class="sbtn" id="sbtn" onclick="runST()">Run Tests</button>
       <span class="speed-status" id="sst"></span>
     </div>
     <div class="speed-summary" id="ssum"></div>
   </div>
+  </div>
   <div class="divider"></div>
+  <div class="section section-status" style="--delay:3">
   <div class="status-section" id="svc-status">
     <h3 class="svc-title">SERVICE STATUS</h3>
-    <div class="svc-grid" id="svc-grid"><div style="text-align:center;font-size:.65rem;color:#374162">Loading...</div></div>
+    <div class="svc-categories" id="svc-grid"><div style="text-align:center;font-size:.65rem;color:#374162">Loading...</div></div>
     <div class="svc-summary" id="svc-summary"></div>
   </div>
-  <div class="footer">Secure access only</div>
+  </div>
+  <div class="divider"></div>
+  <div class="section section-footer" style="--delay:4">
+  <div class="footer">
+    <span class="footer-powered">Powered by StreamMonitor</span>
+    <a href="https://github.com" target="_blank" rel="noopener" class="footer-gh" aria-label="GitHub">
+      <svg viewBox="0 0 16 16" fill="currentColor" width="13" height="13"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>
+    <span class="footer-year"></span>
+  </div>
+  </div>
+  </div>
 </div>
 </div>
 <script>

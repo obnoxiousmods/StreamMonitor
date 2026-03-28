@@ -15,9 +15,9 @@ import config as cfg
 
 _templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
-# ── Rate limiting: 2 tests per 10 minutes per IP ─────────────────────────────
+# ── Rate limiting: 20 tests per 10 minutes per IP ────────────────────────────
 _rate: dict[str, list[float]] = defaultdict(list)
-_RATE_LIMIT = 6
+_RATE_LIMIT = 20
 _RATE_WINDOW = 600  # 10 minutes
 _MAX_MB = 500
 _THROTTLE_BYTES_PER_SEC = 125_000_000  # 1 Gbps

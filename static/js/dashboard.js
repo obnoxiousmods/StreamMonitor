@@ -340,7 +340,7 @@ function renderCard(sid, s){
   </div>`;
   return`<div class="card ${cls}" id="card-${sid}" onclick="openModal('${sid}')" title="Click for details">
     ${acts}
-    <div class="ct">${esc(cur.name)}<span class="badge ${cls}">${cur.ok===null?'PENDING':cur.ok?'UP':'DOWN'}</span>${cur.latency_ms!=null?`<span class="lat">${cur.latency_ms}ms</span>`:''}</div>
+    <div class="ct">${esc(cur.name)}<span class="sbadge ${cur.systemd_ok?'sys-up':'sys-dn'}" title="systemd: ${esc(cur.systemd||'unknown')}">SYS</span>${cur.http_ok===null||cur.http_ok===undefined?'':`<span class="sbadge ${cur.http_ok?'http-up':'http-dn'}" title="${esc(cur.message||'')}">${'HTTP'}</span>`}${cur.latency_ms!=null?`<span class="lat">${cur.latency_ms}ms</span>`:''}</div>
     <div class="meta">${esc(cur.message||'—')} · systemd: ${esc(cur.systemd)}</div>
     ${renderStats(sid,st)}${renderVersion(sid,installed)}
     <div class="bar">${bar(s.history)}</div></div>`;
@@ -776,9 +776,12 @@ function openModal(sid, tab='overview'){
   // Header
   document.getElementById('modal-name').textContent=cur.name;
   const cls=cur.ok===null?'pend':cur.ok?'up':'dn';
-  const badge=document.getElementById('modal-badge');
-  badge.className=`badge ${cls}`;
-  badge.textContent=cur.ok===null?'PENDING':cur.ok?'UP':'DOWN';
+  const sysBadge=document.getElementById('modal-badge-sys');
+  sysBadge.className=`sbadge ${cur.systemd_ok?'sys-up':'sys-dn'}`;
+  sysBadge.title='systemd: '+(cur.systemd||'unknown');
+  const httpBadge=document.getElementById('modal-badge-http');
+  if(cur.http_ok===null||cur.http_ok===undefined){httpBadge.style.display='none';}
+  else{httpBadge.style.display='';httpBadge.className=`sbadge ${cur.http_ok?'http-up':'http-dn'}`;httpBadge.title=cur.message||'';}
   const latEl=document.getElementById('modal-lat');
   latEl.textContent=cur.latency_ms!=null?cur.latency_ms+'ms':'';
 

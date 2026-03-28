@@ -171,20 +171,28 @@ def _collect_system_sync() -> dict:
         # ── Disk I/O rates ──
         try:
             dio = psutil.disk_io_counters()
-            if dio and _prev_disk_io and _prev_io_time:
+            if dio and _prev_disk_io is not None and _prev_io_time > 0:
                 dt = now - _prev_io_time
-                if dt > 0:
-                    rb = (dio.read_bytes - _prev_disk_io.read_bytes) / dt
-                    wb = (dio.write_bytes - _prev_disk_io.write_bytes) / dt
+                # Require at least 2 seconds between samples to avoid
+                # division-by-tiny-dt spikes (normal interval is ~60 s).
+                if dt >= 2.0:
+                    delta_read = dio.read_bytes - _prev_disk_io.read_bytes
+                    delta_write = dio.write_bytes - _prev_disk_io.write_bytes
+                    rb = max(0.0, delta_read / dt)
+                    wb = max(0.0, delta_write / dt)
                     result["disk_io"] = {
-                        "read_rate": _fmt_rate(max(0, rb)),
-                        "write_rate": _fmt_rate(max(0, wb)),
-                        "read_bytes_s": max(0, round(rb)),
-                        "write_bytes_s": max(0, round(wb)),
+                        "read_rate": _fmt_rate(rb),
+                        "write_rate": _fmt_rate(wb),
+                        "read_bytes_s": round(rb),
+                        "write_bytes_s": round(wb),
                         "read_total_gb": round(dio.read_bytes / 1024**3, 2),
                         "write_total_gb": round(dio.write_bytes / 1024**3, 2),
                     }
-            _prev_disk_io = dio
+                    _prev_disk_io = dio
+                # If dt < 2 s, keep the old prev values for next iteration
+            else:
+                # First sample: seed prev without emitting a rate
+                _prev_disk_io = dio
         except Exception:
             pass
 
@@ -276,15 +284,39 @@ def _collect_system_sync() -> dict:
     except Exception:
         pass
 
-    # ── Temperatures & fans ──
+    # ── CPU temperatures via hwmon (direct sysfs) ──
+    try:
+        hwmon_base = Path("/sys/class/hwmon")
+        if hwmon_base.is_dir():
+            for hwmon_dir in hwmon_base.iterdir():
+                name_file = hwmon_dir / "name"
+                if name_file.exists():
+                    driver = name_file.read_text().strip()
+                    if driver in ("coretemp", "k10temp", "zenpower"):
+                        cores: list[int] = []
+                        for i in range(1, 32):
+                            temp_file = hwmon_dir / f"temp{i}_input"
+                            if temp_file.exists():
+                                with contextlib.suppress(ValueError, OSError):
+                                    cores.append(int(temp_file.read_text().strip()) // 1000)
+                        if cores:
+                            result["temps"] = {
+                                "cpu": round(sum(cores) / len(cores)),
+                                "cores": cores,
+                            }
+                        break
+    except Exception:
+        pass
+
+    # ── Temperatures & fans (psutil) ──
     if _HAS_PSUTIL:
         try:
-            temps = psutil.sensors_temperatures()
+            psu_temps = psutil.sensors_temperatures()
             fans = psutil.sensors_fans()
             sensors: dict = {}
 
-            if "coretemp" in temps:
-                pkg = next((e for e in temps["coretemp"] if "Package" in e.label), None)
+            if "coretemp" in psu_temps:
+                pkg = next((e for e in psu_temps["coretemp"] if "Package" in e.label), None)
                 if pkg:
                     tc = pkg.current
                     sensors["cpu_package"] = {
@@ -292,17 +324,17 @@ def _collect_system_sync() -> dict:
                         "high": round(pkg.high) if pkg.high else None,
                         "crit": round(pkg.critical) if pkg.critical else None,
                     }
-                cores = [e.current for e in temps["coretemp"] if "Core" in e.label]
-                if cores:
+                cores_psutil = [e.current for e in psu_temps["coretemp"] if "Core" in e.label]
+                if cores_psutil:
                     sensors["cpu_cores"] = {
-                        "min": round(min(cores), 1),
-                        "max": round(max(cores), 1),
-                        "avg": round(sum(cores) / len(cores), 1),
-                        "count": len(cores),
+                        "min": round(min(cores_psutil), 1),
+                        "max": round(max(cores_psutil), 1),
+                        "avg": round(sum(cores_psutil) / len(cores_psutil), 1),
+                        "count": len(cores_psutil),
                     }
 
-            if "nvme" in temps:
-                nvme_e = next((e for e in temps["nvme"] if 0 < e.current < 105), None)
+            if "nvme" in psu_temps:
+                nvme_e = next((e for e in psu_temps["nvme"] if 0 < e.current < 105), None)
                 if nvme_e:
                     sensors["nvme"] = {
                         "temp": round(nvme_e.current, 1),
@@ -310,8 +342,8 @@ def _collect_system_sync() -> dict:
                         "crit": round(nvme_e.critical) if nvme_e.critical else None,
                     }
 
-            if "nct6793" in temps:
-                for e in temps["nct6793"]:
+            if "nct6793" in psu_temps:
+                for e in psu_temps["nct6793"]:
                     if e.label == "AUXTIN0" and 5 < e.current < 60:
                         sensors["ambient"] = {"temp": round(e.current, 1)}
 

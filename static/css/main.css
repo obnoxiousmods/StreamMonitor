@@ -25,6 +25,9 @@ a.so:hover,button.so:hover{color:#e2e8f0;border-color:#4b5563}
 .ct{font-weight:600;font-size:.88rem;display:flex;align-items:center;gap:.45rem;line-height:1.4}
 .badge{font-size:.62rem;padding:.1rem .38rem;border-radius:999px;font-weight:700}
 .badge.up{background:var(--ok-bg);color:var(--ok)}.badge.dn{background:var(--err-bg);color:var(--err)}.badge.pend{background:#1e2235;color:var(--muted)}
+.sbadge{font-size:.55rem;padding:.08rem .3rem;border-radius:4px;font-weight:700;letter-spacing:.03em;text-transform:uppercase}
+.sbadge.sys-up{background:var(--ok-bg);color:var(--ok)}.sbadge.sys-dn{background:var(--err-bg);color:var(--err)}
+.sbadge.http-up{background:var(--ok-bg);color:var(--ok)}.sbadge.http-dn{background:var(--err-bg);color:var(--err)}
 .lat{font-size:.68rem;color:var(--muted);margin-left:auto}
 .meta{font-size:.72rem;color:var(--muted);margin-top:.25rem;line-height:1.5}
 .sbox{margin:.5rem 0 .4rem;border-radius:6px;background:var(--card2);border:1px solid var(--border);padding:.45rem .55rem}

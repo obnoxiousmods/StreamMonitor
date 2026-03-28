@@ -1,4 +1,72 @@
-(()=>{const s=document.getElementById('stars');for(let i=0;i<60;i++){const d=document.createElement('div');d.className='star';d.style.left=Math.random()*100+'%';d.style.top=Math.random()*100+'%';d.style.setProperty('--d',(2+Math.random()*4)+'s');d.style.setProperty('--delay',Math.random()*3+'s');d.style.width=d.style.height=(1+Math.random()*1.5)+'px';s.appendChild(d)}})();
+/* --- Stars with parallax --- */
+(()=>{
+  const s=document.getElementById('stars');
+  const stars=[];
+  for(let i=0;i<80;i++){
+    const d=document.createElement('div');
+    d.className='star';
+    const x=Math.random()*100, y=Math.random()*100;
+    d.style.left=x+'%';d.style.top=y+'%';
+    d.style.setProperty('--d',(2+Math.random()*4)+'s');
+    d.style.setProperty('--delay',Math.random()*3+'s');
+    const sz=1+Math.random()*1.5;
+    d.style.width=d.style.height=sz+'px';
+    s.appendChild(d);
+    stars.push({el:d,ox:x,oy:y,depth:.2+Math.random()*.8});
+  }
+  /* Parallax on mouse move */
+  let mx=0.5,my=0.5;
+  document.addEventListener('mousemove',(e)=>{
+    mx=e.clientX/window.innerWidth;my=e.clientY/window.innerHeight;
+  });
+  let raf;
+  function updateParallax(){
+    const dx=(mx-.5)*20, dy=(my-.5)*20;
+    for(const st of stars){
+      const px=st.ox+dx*st.depth, py=st.oy+dy*st.depth;
+      st.el.style.left=px+'%';st.el.style.top=py+'%';
+    }
+    raf=requestAnimationFrame(updateParallax);
+  }
+  updateParallax();
+})();
+
+/* --- Animated gradient border angle (JS fallback for browsers without @property) --- */
+(()=>{
+  const card=document.querySelector('.card-border');
+  if(!card)return;
+  /* Test if CSS @property --angle works natively */
+  if(CSS && CSS.registerProperty){
+    try{CSS.registerProperty({name:'--angle',syntax:'<angle>',initialValue:'0deg',inherits:false})}catch(e){}
+  }
+  /* JS fallback rotation */
+  let angle=0;
+  function rotateBorder(){
+    angle=(angle+1)%360;
+    card.style.setProperty('--angle',angle+'deg');
+    requestAnimationFrame(rotateBorder);
+  }
+  rotateBorder();
+})();
+
+/* --- Show endpoint domain labels --- */
+(()=>{
+  function extractDomain(url){
+    try{return new URL(url).hostname}catch(e){return ''}
+  }
+  const epD=document.getElementById('ep-d');
+  const epC=document.getElementById('ep-c');
+  if(epD && typeof SPEEDTEST_DIRECT_URL!=='undefined') epD.textContent=extractDomain(SPEEDTEST_DIRECT_URL);
+  if(epC && typeof SPEEDTEST_CF_URL!=='undefined') epC.textContent=extractDomain(SPEEDTEST_CF_URL);
+})();
+
+/* --- Footer year --- */
+(()=>{
+  const el=document.querySelector('.footer-year');
+  if(el) el.textContent='\u00A9 '+new Date().getFullYear();
+})();
+
+/* --- Speed Test --- */
 let srun=false;
 async function runST(){
   if(srun)return;srun=true;
@@ -24,27 +92,67 @@ async function runST(){
   const v=res.filter(r=>r.mbps!=null);
   if(v.length>1){
     const best=v.reduce((a,b)=>a.mbps>b.mbps?a:b);
-    const diff=((best.mbps/Math.min(...v.map(x=>x.mbps)))-1)*100;
+    const worst=Math.min(...v.map(x=>x.mbps));
+    const diff=((best.mbps/worst)-1)*100;
     const sm=document.getElementById('ssum');sm.style.display='block';
-    sm.textContent=mb+' MB \u2014 '+best.n+' faster'+(diff>1?' by '+diff.toFixed(0)+'%':'')+' ('+v.map(r=>r.n+': '+r.mbps+' Mbps').join(', ')+')';
+    let html=v.map(r=>r.n+': <strong>'+r.mbps+' Mbps</strong>').join(' &nbsp;\u2022&nbsp; ');
+    if(diff>1){
+      html+='<span class="speed-delta">\u2014 '+best.n+' is '+diff.toFixed(0)+'% faster</span>';
+    }
+    sm.innerHTML=html;
   }
   btn.disabled=false;btn.textContent='Run Tests';st.textContent='Done';srun=false;
 }
 
-// Fetch service status from public API
+/* --- Service Status with category grouping --- */
+const CATEGORY_ORDER=['system','streaming','indexers','arr','media','dispatch','downloads','infra'];
+const CATEGORY_LABELS={
+  system:'System',streaming:'Streaming Stack',indexers:'Indexers',arr:'Arr Suite',
+  media:'Media Servers',dispatch:'Dispatching',downloads:'Downloads',infra:'Infrastructure',other:'Other'
+};
+
 (async()=>{try{
   const r=await fetch('/api/public');const d=await r.json();
   const g=document.getElementById('svc-grid');
   const s=document.getElementById('svc-summary');
   if(!d.services){g.textContent='Unavailable';return}
-  const svcs=Object.values(d.services);
-  const up=svcs.filter(v=>v.ok===true).length;
-  const total=svcs.length;
-  g.innerHTML=svcs.map(v=>{
-    const st=v.ok===true?'up':v.ok===false?'down':'unknown';
-    return '<span class="svc-chip"><span class="dot '+st+'"></span>'+v.name+'</span>';
-  }).join('');
-  const pct=Math.round(up/total*100);
+
+  /* Group by category */
+  const cats={};
+  for(const[sid,svc] of Object.entries(d.services)){
+    const cat=svc.category||'other';
+    if(!cats[cat])cats[cat]={label:CATEGORY_LABELS[cat]||cat,services:[]};
+    cats[cat].services.push(svc);
+  }
+
+  /* Sort categories by predefined order */
+  const sortedCats=CATEGORY_ORDER
+    .filter(c=>cats[c])
+    .map(c=>({key:c,...cats[c]}));
+  /* Append any categories not in the order list */
+  for(const k of Object.keys(cats)){
+    if(!CATEGORY_ORDER.includes(k)) sortedCats.push({key:k,...cats[k]});
+  }
+
+  let html='';
+  for(const cat of sortedCats){
+    const up=cat.services.filter(sv=>sv.ok===true).length;
+    const total=cat.services.length;
+    html+='<div class="svc-cat-group">';
+    html+='<div class="svc-cat-header"><span class="svc-cat-label">'+cat.label+'</span>';
+    html+='<span class="svc-cat-count"><span class="cnt-up">'+up+'</span>/'+total+' online</span></div>';
+    html+='<div class="svc-cat-chips">';
+    for(const sv of cat.services){
+      const st=sv.ok===true?'up':sv.ok===false?'down':'unknown';
+      html+='<span class="svc-chip"><span class="dot '+st+'"></span>'+sv.name+'</span>';
+    }
+    html+='</div></div>';
+  }
+  g.innerHTML=html;
+
+  const totalAll=Object.keys(d.services).length;
+  const upAll=Object.values(d.services).filter(sv=>sv.ok===true).length;
+  const pct=Math.round(upAll/totalAll*100);
   const col=pct===100?'#34d399':pct>=90?'#fbbf24':'#f87171';
-  s.innerHTML='<span style="color:'+col+';font-weight:700">'+up+'/'+total+'</span> services up ('+pct+'%)';
+  s.innerHTML='<span style="color:'+col+';font-weight:700">'+upAll+'/'+totalAll+'</span> services up ('+pct+'%)';
 }catch(e){document.getElementById('svc-grid').textContent='Could not load status';}})();
