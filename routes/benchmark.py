@@ -79,51 +79,82 @@ def _build_endpoints(imdb_raw: str):
     # Strip episode suffix like S03E07 for Zilean query
     zilean_query = re.sub(r"\s*S\d+E\d+$", "", title)
 
-    return [
-        # Self-hosted
-        {
-            "name": "Comet",
-            "group": "self-hosted",
-            "url": f"{cfg.COMET_URL}/{cfg.BENCH_COMET_CONFIG}/stream/{media_type}/{imdb_raw}.json",
-        },
+    endpoints: list[dict] = []
+
+    # Self-hosted (only include if config token is set)
+    if cfg.BENCH_COMET_CONFIG:
+        endpoints.append(
+            {
+                "name": "Comet",
+                "group": "self-hosted",
+                "url": f"{cfg.COMET_URL}/{cfg.BENCH_COMET_CONFIG}/stream/{media_type}/{imdb_raw}.json",
+            }
+        )
+
+    endpoints.append(
         {
             "name": "Zilean",
             "group": "self-hosted",
             "url": f"{cfg.ZILEAN_URL}/dmm/filtered?Query={zilean_query}&limit=100",
             "zilean": True,
-        },
-        {
-            "name": "MediaFusion",
-            "group": "self-hosted",
-            "url": f"{cfg.MEDIAFUSION_URL}/{cfg.BENCH_MEDIAFUSION_CONFIG}/stream/{media_type}/{imdb_raw}.json",
-        },
-        {
-            "name": "StremThru Torz",
-            "group": "self-hosted",
-            "url": f"{cfg.STREMTHRU_URL}/stremio/torz/{cfg.BENCH_STREMTHRU_CONFIG}/stream/{media_type}/{imdb_raw}.json",
-        },
-        {
-            "name": "AIOStreams",
-            "group": "self-hosted",
-            "url": f"{cfg.AIOSTREAMS_URL}/stremio/{cfg.BENCH_AIOSTREAMS_CONFIG}/stream/{media_type}/{imdb_raw}.json",
-        },
-        # Public
-        {
-            "name": "Torrentio (RD)",
-            "group": "public",
-            "url": f"https://torrentio.strem.fun/realdebrid={cfg.BENCH_TORRENTIO_RD_KEY}/stream/{media_type}/{imdb_raw}.json",
-        },
-        {
-            "name": "Torrentio P2P",
-            "group": "public",
-            "url": f"https://torrentio.strem.fun/stream/{media_type}/{imdb_raw}.json",
-        },
-        {
-            "name": "TorBox Stremio",
-            "group": "public",
-            "url": f"https://stremio.torbox.app/stream/{media_type}/{imdb_raw}.json",
-        },
-    ]
+        }
+    )
+
+    if cfg.BENCH_MEDIAFUSION_CONFIG:
+        endpoints.append(
+            {
+                "name": "MediaFusion",
+                "group": "self-hosted",
+                "url": f"{cfg.MEDIAFUSION_URL}/{cfg.BENCH_MEDIAFUSION_CONFIG}/stream/{media_type}/{imdb_raw}.json",
+            }
+        )
+
+    if cfg.BENCH_STREMTHRU_CONFIG:
+        st_conf = cfg.BENCH_STREMTHRU_CONFIG
+        endpoints.append(
+            {
+                "name": "StremThru Torz",
+                "group": "self-hosted",
+                "url": f"{cfg.STREMTHRU_URL}/stremio/torz/{st_conf}/stream/{media_type}/{imdb_raw}.json",
+            }
+        )
+
+    if cfg.BENCH_AIOSTREAMS_CONFIG:
+        aio_conf = cfg.BENCH_AIOSTREAMS_CONFIG
+        endpoints.append(
+            {
+                "name": "AIOStreams",
+                "group": "self-hosted",
+                "url": f"{cfg.AIOSTREAMS_URL}/stremio/{aio_conf}/stream/{media_type}/{imdb_raw}.json",
+            }
+        )
+
+    # Public
+    if cfg.BENCH_TORRENTIO_RD_KEY:
+        endpoints.append(
+            {
+                "name": "Torrentio (RD)",
+                "group": "public",
+                "url": f"https://torrentio.strem.fun/realdebrid={cfg.BENCH_TORRENTIO_RD_KEY}/stream/{media_type}/{imdb_raw}.json",
+            }
+        )
+
+    endpoints.extend(
+        [
+            {
+                "name": "Torrentio P2P",
+                "group": "public",
+                "url": f"https://torrentio.strem.fun/stream/{media_type}/{imdb_raw}.json",
+            },
+            {
+                "name": "TorBox Stremio",
+                "group": "public",
+                "url": f"https://stremio.torbox.app/stream/{media_type}/{imdb_raw}.json",
+            },
+        ]
+    )
+
+    return endpoints
 
 
 # ── Resolution / codec parsing ────────────────────────────────────────────────
@@ -205,7 +236,26 @@ async def _bench_one(ep: dict) -> dict:
             resp = await client.get(ep["url"], headers={"User-Agent": _UA})
             latency = int((time.monotonic() - t0) * 1000)
             result["latency_ms"] = latency
-            data = resp.json()
+
+            if resp.status_code != 200:
+                result["error"] = f"HTTP {resp.status_code}"
+                return result
+
+            # Guard against non-JSON responses (HTML error pages, etc.)
+            ct = resp.headers.get("content-type", "")
+            body = resp.text
+            if not ("json" in ct or body.lstrip().startswith(("{", "["))):
+                preview = body[:120].replace("\n", " ").strip()
+                result["error"] = f"non-JSON response: {preview}"
+                return result
+
+            try:
+                data = resp.json()
+            except Exception:
+                preview = body[:120].replace("\n", " ").strip()
+                result["error"] = f"invalid JSON: {preview}"
+                return result
+
             parsed = _parse_streams(data, zilean=ep.get("zilean", False))
             result.update(parsed)
     except httpx.TimeoutException:
@@ -228,6 +278,20 @@ async def api_benchmark(request: Request):
     title = TITLES.get(imdb) or TITLES.get(base_imdb) or "Unknown"
     endpoints = _build_endpoints(imdb)
 
+    # Warn about unconfigured endpoints
+    _config_map = {
+        "Comet": "BENCH_COMET_CONFIG",
+        "MediaFusion": "BENCH_MEDIAFUSION_CONFIG",
+        "StremThru Torz": "BENCH_STREMTHRU_CONFIG",
+        "AIOStreams": "BENCH_AIOSTREAMS_CONFIG",
+        "Torrentio (RD)": "BENCH_TORRENTIO_RD_KEY",
+    }
+    skipped = [
+        {"name": name, "env_var": var}
+        for name, var in _config_map.items()
+        if not getattr(cfg, var, "")
+    ]
+
     results = await asyncio.gather(*[_bench_one(ep) for ep in endpoints])
 
     # Compute summary
@@ -239,15 +303,17 @@ async def api_benchmark(request: Request):
     pub_streams = sum(r["streams"] for r in pub)
     pub_avg_lat = int(sum(r["latency_ms"] for r in pub) / len(pub)) if pub else None
 
-    return JSONResponse(
-        {
-            "imdb": imdb,
-            "title": title,
-            "timestamp": datetime.now(UTC).isoformat(),
-            "results": results,
-            "summary": {
-                "self_hosted": {"total_streams": sh_streams, "avg_latency_ms": sh_avg_lat},
-                "public": {"total_streams": pub_streams, "avg_latency_ms": pub_avg_lat},
-            },
-        }
-    )
+    payload: dict = {
+        "imdb": imdb,
+        "title": title,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "results": results,
+        "summary": {
+            "self_hosted": {"total_streams": sh_streams, "avg_latency_ms": sh_avg_lat},
+            "public": {"total_streams": pub_streams, "avg_latency_ms": pub_avg_lat},
+        },
+    }
+    if skipped:
+        payload["skipped"] = skipped
+
+    return JSONResponse(payload)

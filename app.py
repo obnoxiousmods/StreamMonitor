@@ -93,7 +93,7 @@ def check_pw(username: str, password: str) -> bool:
         return False
     try:
         return ph.verify(ADMIN_HASH[0], password)
-    except VerifyMismatchError, Exception:
+    except (VerifyMismatchError, Exception):
         return False
 
 
@@ -241,7 +241,7 @@ async def api_logs(request: Request):
         return JSONResponse({"error": "not allowed"}, status_code=403)
     try:
         n = str(min(int(request.query_params.get("n", "200")), 1000))
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         n = "200"
     try:
         p = await asyncio.create_subprocess_exec(

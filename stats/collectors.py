@@ -132,6 +132,58 @@ async def collect_comet() -> dict:
         result["slo_fail_rate"] = slo.get("fail_rate", 0)
         result["slo_processed"] = slo.get("processed", 0)
 
+    # DB fallback for torrent count when the admin API metrics endpoint times out
+    if "torrents_total" not in result:
+        try:
+            import json as _json
+
+            proc = await asyncio.create_subprocess_exec(
+                "psql",
+                "-h", "127.0.0.1",
+                "-p", "6432",
+                "-U", "comet",
+                "-d", "comet",
+                "-t", "-A",
+                "-c", "SELECT payload_json FROM metrics_cache LIMIT 1;",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            payload = out.decode().strip()
+            if payload:
+                cached = _json.loads(payload)
+                t = cached.get("torrents", {})
+                result["torrents_total"] = t.get("total", 0)
+                by_tracker = t.get("by_tracker", [])
+                if "top_trackers" not in result and by_tracker:
+                    result["top_trackers"] = [
+                        {"name": tr["tracker"], "count": tr["count"]}
+                        for tr in by_tracker[:5]
+                    ]
+        except Exception:
+            pass
+
+    # Last resort: estimated count from pg_class stats
+    if "torrents_total" not in result:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "psql",
+                "-h", "127.0.0.1",
+                "-p", "6432",
+                "-U", "comet",
+                "-d", "comet",
+                "-t", "-A",
+                "-c", "SELECT reltuples::bigint FROM pg_class WHERE relname = 'torrents';",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            val = out.decode().strip()
+            if val.lstrip("-").isdigit() and int(val) > 0:
+                result["torrents_total"] = int(val)
+        except Exception:
+            pass
+
     return result
 
 

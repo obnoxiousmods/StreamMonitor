@@ -161,7 +161,7 @@ def _collect_system_sync() -> dict:
                             "percent": u.percent,
                         }
                     )
-                except PermissionError, OSError:
+                except (PermissionError, OSError):
                     pass
             if drives:
                 result["disks"] = drives
