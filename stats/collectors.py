@@ -139,12 +139,18 @@ async def collect_comet() -> dict:
 
             proc = await asyncio.create_subprocess_exec(
                 "psql",
-                "-h", "127.0.0.1",
-                "-p", "6432",
-                "-U", "comet",
-                "-d", "comet",
-                "-t", "-A",
-                "-c", "SELECT payload_json FROM metrics_cache LIMIT 1;",
+                "-h",
+                "127.0.0.1",
+                "-p",
+                "6432",
+                "-U",
+                "comet",
+                "-d",
+                "comet",
+                "-t",
+                "-A",
+                "-c",
+                "SELECT payload_json FROM metrics_cache LIMIT 1;",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -156,10 +162,7 @@ async def collect_comet() -> dict:
                 result["torrents_total"] = t.get("total", 0)
                 by_tracker = t.get("by_tracker", [])
                 if "top_trackers" not in result and by_tracker:
-                    result["top_trackers"] = [
-                        {"name": tr["tracker"], "count": tr["count"]}
-                        for tr in by_tracker[:5]
-                    ]
+                    result["top_trackers"] = [{"name": tr["tracker"], "count": tr["count"]} for tr in by_tracker[:5]]
         except Exception:
             pass
 
@@ -168,12 +171,18 @@ async def collect_comet() -> dict:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "psql",
-                "-h", "127.0.0.1",
-                "-p", "6432",
-                "-U", "comet",
-                "-d", "comet",
-                "-t", "-A",
-                "-c", "SELECT reltuples::bigint FROM pg_class WHERE relname = 'torrents';",
+                "-h",
+                "127.0.0.1",
+                "-p",
+                "6432",
+                "-U",
+                "comet",
+                "-d",
+                "comet",
+                "-t",
+                "-A",
+                "-c",
+                "SELECT reltuples::bigint FROM pg_class WHERE relname = 'torrents';",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

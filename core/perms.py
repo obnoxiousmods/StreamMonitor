@@ -94,8 +94,7 @@ def _stat_entry(label: str, path: str, exp_user: str, exp_group: str, exp_mode: 
         "exp_mode": exp_mode_str,
     }
     if not p.exists():
-        return {
-            **base,
+        return base | {
             "exists": False,
             "missing": True,
             "cur_user": "—",
@@ -115,8 +114,7 @@ def _stat_entry(label: str, path: str, exp_user: str, exp_group: str, exp_mode: 
             cur_group = str(s.st_gid)
         cur_mode = oct(stat.S_IMODE(s.st_mode))[2:]
         ok = cur_user == exp_user and cur_group == exp_group and cur_mode == exp_mode_str
-        return {
-            **base,
+        return base | {
             "exists": True,
             "missing": False,
             "cur_user": cur_user,
@@ -125,8 +123,7 @@ def _stat_entry(label: str, path: str, exp_user: str, exp_group: str, exp_mode: 
             "ok": ok,
         }
     except Exception as e:
-        return {
-            **base,
+        return base | {
             "exists": True,
             "missing": False,
             "cur_user": "?",

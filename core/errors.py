@@ -70,7 +70,7 @@ def _extract_ts(journal_line: str, fallback: float) -> float:
             # Normalize: +0700 → +07:00, Z → +00:00
             s = re.sub(r"([+-])(\d{2})(\d{2})$", r"\1\2:\3", s)
             if s.endswith("Z"):
-                s = s[:-1] + "+00:00"
+                s = f"{s.removesuffix('Z')}+00:00"
             return datetime.fromisoformat(s).timestamp()
         except Exception:
             pass
@@ -207,7 +207,7 @@ def _classify_stremthru(line: str) -> tuple[str, str] | None:
             return "warning", "stremthru"
         if lvl in ("FATAL", "PANIC"):
             return "error", "stremthru"
-    except json.JSONDecodeError, TypeError:
+    except (json.JSONDecodeError, TypeError):
         pass
     # Fallback plain-text
     if re.search(r'"level"\s*:\s*"(ERROR|FATAL|PANIC)"', line):

@@ -1,0 +1,20 @@
+{
+  "name": "streammonitor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "StreamMonitor frontend linting and formatting",
+  "scripts": {
+    "lint:js": "eslint static/js/",
+    "lint:css": "stylelint \"static/css/*.css\"",
+    "format": "prettier --write static/js/ static/css/",
+    "lint": "npm run lint:js && npm run lint:css"
+  },
+  "devDependencies": {
+    "eslint": "^10.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
+    "stylelint": "^17.6.0",
+    "stylelint-config-standard": "^40.0.0"
+  }
+}

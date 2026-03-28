@@ -142,10 +142,7 @@ async def login(request: Request):
     return templates.TemplateResponse(
         request,
         "login.html",
-        {
-            "error_html": error_html,
-            **_SPEEDTEST_CTX,
-        },
+        {"error_html": error_html} | _SPEEDTEST_CTX,
     )
 
 
@@ -163,8 +160,8 @@ async def dashboard(request: Request):
             "units_html": _UNIT_OPTS,
             "web_urls_json": json.dumps(cfg.WEB_URLS),
             "bench_titles_json": json.dumps(BENCH_TITLES),
-            **_SPEEDTEST_CTX,
-        },
+        }
+        | _SPEEDTEST_CTX,
     )
 
 

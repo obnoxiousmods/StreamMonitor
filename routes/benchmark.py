@@ -286,11 +286,7 @@ async def api_benchmark(request: Request):
         "AIOStreams": "BENCH_AIOSTREAMS_CONFIG",
         "Torrentio (RD)": "BENCH_TORRENTIO_RD_KEY",
     }
-    skipped = [
-        {"name": name, "env_var": var}
-        for name, var in _config_map.items()
-        if not getattr(cfg, var, "")
-    ]
+    skipped = [{"name": name, "env_var": var} for name, var in _config_map.items() if not getattr(cfg, var, "")]
 
     results = await asyncio.gather(*[_bench_one(ep) for ep in endpoints])
 

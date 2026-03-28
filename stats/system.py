@@ -31,10 +31,14 @@ if _HAS_PSUTIL:
         _PART_SEED = re.compile(r"(sd[a-z]+|nvme\d+n\d+)$")
         _wd = {k: v for k, v in _pd.items() if _PART_SEED.match(k)}
         if _wd:
-            _prev_disk_io = type("DIO", (), {
-                "read_bytes": sum(v.read_bytes for v in _wd.values()),
-                "write_bytes": sum(v.write_bytes for v in _wd.values()),
-            })()
+            _prev_disk_io = type(
+                "DIO",
+                (),
+                {
+                    "read_bytes": sum(v.read_bytes for v in _wd.values()),
+                    "write_bytes": sum(v.write_bytes for v in _wd.values()),
+                },
+            )()
     try:
         _VIRT_INIT = re.compile(r"^(lo|docker|veth|br-|virbr|tun|tap)")
         _nic_init = _p.net_io_counters(pernic=True)

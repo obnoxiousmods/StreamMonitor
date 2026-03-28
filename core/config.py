@@ -37,7 +37,7 @@ def _load_keys() -> dict[str, str]:
                     home_keys[k.strip()] = v.strip()
     except Exception:
         pass
-    return {**home_keys, **saved}  # saved overrides home
+    return home_keys | saved  # saved overrides home
 
 
 _stored = _load_keys()
