@@ -1,14 +1,44 @@
 [project]
 name = "streammonitor"
 version = "0.1.0"
-description = "Add your description here"
+description = "Real-time infrastructure monitoring dashboard for self-hosted media streaming stacks"
 requires-python = ">=3.14"
 dependencies = [
     "argon2-cffi>=25.1.0",
     "httpx[http2]>=0.28.1",
     "itsdangerous>=2.2.0",
+    "jinja2>=3.1.6",
     "psutil>=7.2.2",
     "python-multipart>=0.0.22",
     "starlette>=1.0.0",
     "uvicorn[standard]>=0.42.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.0",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "SIM",    # flake8-simplify
+    "RUF",    # ruff-specific
+]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "health", "stats", "errors", "perms", "routes"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

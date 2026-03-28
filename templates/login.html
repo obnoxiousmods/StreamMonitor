@@ -1,0 +1,51 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StreamMonitor - Sign In</title>
+<meta name="description" content="Sign in to StreamMonitor infrastructure dashboard">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#060818">
+<meta property="og:title" content="StreamMonitor">
+<meta property="og:description" content="Infrastructure monitoring for streaming and media services">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="/static/css/login.css">
+</head><body>
+<div class="stars" id="stars"></div>
+<div class="wrapper">
+<div class="card">
+  <div class="dish"><span class="dish-icon">&#x1F4E1;</span></div>
+  <div class="title">StreamMonitor</div>
+  <div class="subtitle">Infrastructure &amp; Streaming Stack</div>
+  {{ error_html|safe }}
+  <form method="post">
+    <div class="field"><label>Username</label><input name="username" autocomplete="username" placeholder="admin" autofocus></div>
+    <div class="field"><label>Password</label><input name="password" type="password" placeholder="Enter password" autocomplete="current-password"></div>
+    <button class="btn" type="submit">Sign In</button>
+  </form>
+  <div class="divider"></div>
+  <div class="speed-section">
+    <h3>Speed Test</h3>
+    <div class="stest"><span class="name">{{ speedtest_direct_name }}</span><div class="sbar"><div class="fill" id="bf-d"></div></div><span class="sval" id="sv-d">&mdash;</span></div>
+    <div class="stest"><span class="name">{{ speedtest_cf_name }}</span><div class="sbar"><div class="fill" id="bf-c"></div></div><span class="sval" id="sv-c">&mdash;</span></div>
+    <div class="speed-controls">
+      <select id="smb"><option value="10">10 MB</option><option value="25" selected>25 MB</option><option value="50">50 MB</option><option value="100">100 MB</option></select>
+      <button class="sbtn" id="sbtn" onclick="runST()">Run Tests</button>
+      <span class="speed-status" id="sst"></span>
+    </div>
+    <div class="speed-summary" id="ssum"></div>
+  </div>
+  <div class="divider"></div>
+  <div class="status-section" id="svc-status">
+    <h3 class="svc-title">SERVICE STATUS</h3>
+    <div class="svc-grid" id="svc-grid"><div style="text-align:center;font-size:.65rem;color:#374162">Loading...</div></div>
+    <div class="svc-summary" id="svc-summary"></div>
+  </div>
+  <div class="footer">Secure access only</div>
+</div>
+</div>
+<script>
+const SPEEDTEST_DIRECT_URL = {{ speedtest_direct_url|tojson }};
+const SPEEDTEST_DIRECT_NAME = {{ speedtest_direct_name|tojson }};
+const SPEEDTEST_CF_URL = {{ speedtest_cf_url|tojson }};
+const SPEEDTEST_CF_NAME = {{ speedtest_cf_name|tojson }};
+</script>
+<script src="/static/js/login.js"></script>
+</body></html>

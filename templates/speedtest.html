@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Speed Test - StreamMonitor</title>
+<meta name="description" content="Download speed test via direct and Cloudflare endpoints">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0a0c14">
+<link rel="stylesheet" href="/static/css/speedtest.css">
+</head>
+<body>
+<div class="container">
+<div class="card">
+  <div class="header">
+    <span class="icon">&#x1F4E1;</span>
+    <h1>Speed Test</h1>
+    <p>Test download speed via direct and Cloudflare endpoints</p>
+  </div>
+
+  <div class="test-group">
+    <h3>Direct (Origin)</h3>
+    <div class="test-row" id="row-direct">
+      <span class="test-label">Download</span>
+      <div class="bar-wrap"><div class="bar-fill" id="bar-direct"></div></div>
+      <span class="result" id="res-direct">&mdash;</span>
+    </div>
+  </div>
+
+  <div class="test-group">
+    <h3>Cloudflare (CDN)</h3>
+    <div class="test-row" id="row-cf">
+      <span class="test-label">Download</span>
+      <div class="bar-wrap"><div class="bar-fill" id="bar-cf"></div></div>
+      <span class="result" id="res-cf">&mdash;</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-primary" id="btn-run" onclick="runAll()">Run Speed Test</button>
+    <select id="sel-mb">
+      <option value="10">10 MB</option>
+      <option value="25" selected>25 MB</option>
+      <option value="50">50 MB</option>
+      <option value="100">100 MB</option>
+      <option value="250">250 MB</option>
+      <option value="500">500 MB</option>
+    </select>
+    <span class="status" id="status"></span>
+  </div>
+
+  <div class="summary" id="summary">
+    <h3>Results</h3>
+    <div id="summary-rows"></div>
+  </div>
+</div>
+</div>
+
+<script>
+const SPEEDTEST_DIRECT_URL = {{ speedtest_direct_url|tojson }};
+const SPEEDTEST_DIRECT_NAME = {{ speedtest_direct_name|tojson }};
+const SPEEDTEST_CF_URL = {{ speedtest_cf_url|tojson }};
+const SPEEDTEST_CF_NAME = {{ speedtest_cf_name|tojson }};
+</script>
+<script src="/static/js/speedtest.js"></script>
+</body>
+</html>

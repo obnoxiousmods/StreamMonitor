@@ -1,12 +1,13 @@
 """Shared state and HTTP helpers for stats collectors."""
+
 from __future__ import annotations
 
 import httpx
 
 # ── Shared state (imported by all collector modules) ──────────────────────────
-service_stats:    dict[str, dict] = {}
-stats_updated_at: dict[str, str]  = {}
-github_versions:  dict[str, dict] = {}
+service_stats: dict[str, dict] = {}
+stats_updated_at: dict[str, str] = {}
+github_versions: dict[str, dict] = {}
 
 
 async def _get(

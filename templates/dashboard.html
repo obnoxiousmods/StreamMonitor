@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>StreamMonitor - Infrastructure Dashboard</title>
+<meta name="description" content="Real-time infrastructure monitoring dashboard for streaming services, media servers, and system health">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0a0c14">
+<meta property="og:title" content="StreamMonitor">
+<meta property="og:description" content="Infrastructure monitoring dashboard for streaming and media services">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+<header>
+  <h1>&#x1F4E1; StreamMonitor</h1>
+  <div class="hdr-mid" id="overview"></div>
+  <div class="hdr-right">
+    <span id="ts-hdr" style="font-size:.68rem;color:var(--muted)"></span>
+    <a class="so" href="/logout">Sign out</a>
+  </div>
+</header>
+<div class="tabs">
+  <button class="tab active" onclick="tab('s',this)">Services</button>
+  <button class="tab" onclick="tab('l',this);initLogs()">Logs</button>
+  <button class="tab" onclick="tab('p',this);initPerms()">Perms</button>
+  <button id="err-tab" class="tab" onclick="tab('e',this);loadErrors()">Errors</button>
+  <button class="tab" onclick="tab('g',this);loadSettings()">Settings</button>
+  <button class="tab" onclick="tab('j',this);loadJellyfin()">Jellyfin</button>
+  <button class="tab" onclick="tab('sp',this)">Speed</button>
+  <button class="tab" onclick="tab('b',this);initBench()">Benchmark</button>
+  <button class="tab" onclick="tab('a',this)">API</button>
+</div>
+
+<div id="p-s" class="panel active">
+  <div id="ts"></div>
+  <div id="cats"></div>
+</div>
+
+<div id="p-l" class="panel">
+  <div class="toolbar">
+    <select id="unit" onchange="fetchLogs()">{{ units_html|safe }}</select>
+    <select id="log-lines" onchange="fetchLogs()" style="min-width:0;width:100px">
+      <option value="100">100 lines</option>
+      <option value="200" selected>200 lines</option>
+      <option value="500">500 lines</option>
+    </select>
+    <input type="text" id="log-search" placeholder="Filter..." oninput="filterLogs()" style="width:130px">
+    <button class="sm" onclick="fetchLogs()">Refresh</button>
+    <label style="font-size:.68rem;color:var(--muted);display:flex;gap:.3rem;align-items:center;cursor:pointer">
+      <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
+    </label>
+    <span class="log-status" id="log-status"></span>
+  </div>
+  <div id="logbox" style="color:var(--muted)">Select a service to view logs.</div>
+</div>
+
+<div id="p-p" class="panel">
+  <div style="display:flex;gap:.7rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
+    <button class="sm" id="scan-btn" onclick="runScan()">&#x27F3; Scan directories</button>
+    <label style="font-size:.72rem;color:var(--muted);display:flex;align-items:center;gap:.3rem;cursor:pointer">
+      <input type="checkbox" id="perm-recursive"> Recursive (-R)
+    </label>
+    <label style="font-size:.72rem;color:var(--muted);display:flex;align-items:center;gap:.3rem;cursor:pointer">
+      <input type="checkbox" id="perm-issues-only" onchange="renderPermResults()"> Issues only
+    </label>
+    <select id="perm-section-filter" onchange="renderPermResults()" style="font-size:.72rem;min-width:0;width:150px">
+      <option value="">All sections</option>
+    </select>
+    <span id="scan-meta" style="font-size:.68rem;color:var(--muted);margin-left:auto"></span>
+  </div>
+  <div id="perm-results"></div>
+</div>
+
+<div id="p-e" class="panel">
+  <div style="display:flex;gap:.7rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap">
+    <select id="err-svc" onchange="filterErrors()" style="width:140px">
+      <option value="">All services</option>
+    </select>
+    <select id="err-sev" onchange="filterErrors()" style="min-width:0;width:110px">
+      <option value="">All</option>
+      <option value="error">Errors</option>
+      <option value="warning">Warnings</option>
+    </select>
+    <select id="err-sort" onchange="filterErrors()" style="min-width:0;width:140px">
+      <option value="newest">Newest first</option>
+      <option value="oldest">Oldest first</option>
+      <option value="count">Most recurring</option>
+      <option value="svc">By service</option>
+    </select>
+    <button class="sm" onclick="scanNow()">&#x27F3; Scan now</button>
+    <button class="sm" onclick="clearErrors()" style="color:var(--muted)">&#10005; Clear</button>
+    <span id="err-meta" style="font-size:.68rem;color:var(--muted);margin-left:auto"></span>
+  </div>
+  <div id="err-summary" style="font-size:.68rem;color:var(--muted);margin-bottom:.5rem;padding:.25rem 0;border-bottom:1px solid var(--border)"></div>
+  <div id="err-list" style="font-family:monospace;font-size:.72rem;line-height:1.6"></div>
+</div>
+
+<div id="p-g" class="panel">
+  <div class="settings-grid" id="settings-grid">
+    <div style="color:var(--muted);font-size:.8rem;padding:.5rem">Loading settings...</div>
+  </div>
+</div>
+
+<div id="p-j" class="panel">
+  <div style="display:flex;gap:.7rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
+    <button class="sm" onclick="loadJellyfin()">&#x27F3; Refresh</button>
+    <span id="jf-meta" style="font-size:.68rem;color:var(--muted);margin-left:auto"></span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start" id="jf-grid">
+    <div class="settings-sec" id="jf-sessions"><h3>Active Sessions</h3><div style="color:var(--muted);font-size:.78rem">Loading...</div></div>
+    <div class="settings-sec" id="jf-activity"><h3>Recent Activity</h3><div style="color:var(--muted);font-size:.78rem">Loading...</div></div>
+  </div>
+</div>
+
+<div id="p-sp" class="panel">
+  <iframe src="/speedtest" style="width:100%;height:700px;border:none;border-radius:10px"></iframe>
+</div>
+
+<div id="p-b" class="panel">
+  <div style="display:flex;gap:.7rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
+    <select id="bench-title" style="min-width:260px">
+      <option value="">Select a title...</option>
+    </select>
+    <button class="sm" id="bench-run-btn" onclick="runBench()">&#x25B6; Run Benchmark</button>
+    <button class="sm" onclick="runAllBench()">&#x25B6;&#x25B6; Run All (slow)</button>
+    <span id="bench-status" style="font-size:.68rem;color:var(--muted);margin-left:auto"></span>
+  </div>
+  <div id="bench-results"></div>
+</div>
+
+<div id="p-a" class="panel" style="font-size:.84rem;line-height:1.8">
+  <b style="color:var(--accent2)">REST API</b>
+  <div class="api-row"><code>GET /api/ping</code> &mdash; unauthenticated liveness check</div>
+  <div class="api-row"><code>GET /api/status[/{id}]</code> &mdash; service health + history</div>
+  <div class="api-row"><code>GET /api/stats[/{id}]</code> &mdash; API statistics per service</div>
+  <div class="api-row"><code>GET /api/versions</code> &mdash; installed + latest GitHub versions</div>
+  <div class="api-row"><code>GET /api/logs/{unit}</code> &mdash; last 200 journal lines</div>
+  <div class="api-row"><code>GET /api/errors</code> &mdash; scanned error/warning history</div>
+  <div class="api-row"><code>POST /api/errors/scan</code> &mdash; trigger immediate log scan</div>
+  <div class="api-row"><code>GET /api/settings/keys</code> &mdash; list configured API keys (masked)</div>
+  <div class="api-row"><code>POST /api/settings/keys</code> &mdash; update API keys</div>
+  <div class="api-row"><code>POST /api/settings/password</code> &mdash; change admin password</div>
+  <div class="api-row"><code>GET /api/benchmark?imdb=ttXXXXXXX</code> &mdash; run addon benchmark</div>
+  <div class="api-row"><code>GET /api/jellyfin</code> &mdash; Jellyfin sessions &amp; activity</div>
+  <div class="api-row"><code>GET /api/public</code> &mdash; unauthenticated health summary</div>
+  <div class="api-row"><code>GET /api/dmesg</code> &mdash; kernel log (journalctl -k)</div>
+  <div class="api-row"><code>GET /speedtest</code> &mdash; speed test page</div>
+  <div class="api-row"><code>GET /speedtest/download?mb=25</code> &mdash; speed test download endpoint</div>
+</div>
+
+<!-- Service Modal -->
+<div id="svc-modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-hdr">
+      <div class="modal-title">
+        <span id="modal-name">Service</span>
+        <span id="modal-badge" class="badge up">UP</span>
+        <span id="modal-lat" class="lat" style="font-size:.68rem"></span>
+        <a id="modal-weburl" class="modal-url" target="_blank" rel="noopener" style="display:none">&#x2197; Open</a>
+      </div>
+      <button class="modal-close" onclick="closeModal()">&#x2715;</button>
+    </div>
+    <div class="modal-meta">
+      <span id="modal-msg"></span>
+      <span id="modal-unit" style="font-family:monospace;color:var(--border-active,#374162)"></span>
+      <span id="modal-ts" style="margin-left:auto"></span>
+    </div>
+    <div class="mtabs">
+      <button class="mtab active" onclick="openMTab('overview',this)">Overview</button>
+      <button class="mtab" onclick="openMTab('logs',this)">Logs</button>
+      <button class="mtab" onclick="openMTab('controls',this)">Controls</button>
+    </div>
+    <div id="mt-overview" class="mpanel active">
+      <div id="modal-stats-body"></div>
+      <div id="modal-version-body" style="margin-top:.4rem"></div>
+      <div id="modal-history-body" style="margin-top:.5rem"></div>
+    </div>
+    <div id="mt-logs" class="mpanel">
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;flex-shrink:0">
+        <select id="modal-log-lines" onchange="modalFetchLogs()" style="min-width:0;width:100px">
+          <option value="100">100 lines</option>
+          <option value="200" selected>200 lines</option>
+          <option value="500">500 lines</option>
+        </select>
+        <input type="text" id="modal-log-search" placeholder="Filter..." oninput="modalFilterLogs()" style="width:130px">
+        <button class="sm" onclick="modalFetchLogs()">Refresh</button>
+        <span id="modal-log-status" style="font-size:.65rem;color:var(--muted);margin-left:auto"></span>
+      </div>
+      <div id="modal-logbox" style="color:var(--muted)">Select Logs tab to load.</div>
+    </div>
+    <div id="mt-controls" class="mpanel">
+      <div class="ctrl-grid">
+        <button class="ctrl-btn start" onclick="svcAction('start')">&#9654; Start</button>
+        <button class="ctrl-btn stop"  onclick="svcAction('stop')">&#9632; Stop</button>
+        <button class="ctrl-btn restart" onclick="svcAction('restart')">&#x27F3; Restart</button>
+        <button class="ctrl-btn open-web" id="ctrl-open-web" style="display:none" onclick="openServiceWeb()">&#x2197; Open Web UI</button>
+      </div>
+      <div class="ctrl-output" id="ctrl-output" style="color:var(--muted)">Action output will appear here.</div>
+      <div class="ctrl-sysinfo" id="ctrl-sysinfo"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const WEB_URLS = {{ web_urls_json|safe }};
+const BENCH_TITLES = {{ bench_titles_json|safe }};
+const SPEEDTEST_DIRECT_URL = {{ speedtest_direct_url|tojson }};
+const SPEEDTEST_DIRECT_NAME = {{ speedtest_direct_name|tojson }};
+const SPEEDTEST_CF_URL = {{ speedtest_cf_url|tojson }};
+const SPEEDTEST_CF_NAME = {{ speedtest_cf_name|tojson }};
+</script>
+<script src="/static/js/dashboard.js"></script>
+</body></html>

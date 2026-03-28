@@ -1,4 +1,5 @@
 """Dmesg / kernel log endpoint."""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +17,12 @@ async def api_dmesg(request: Request):
 
     try:
         p = await asyncio.create_subprocess_exec(
-            "sudo", "journalctl", "-k", "--no-pager", "-n", str(lines),
+            "sudo",
+            "journalctl",
+            "-k",
+            "--no-pager",
+            "-n",
+            str(lines),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -25,7 +31,7 @@ async def api_dmesg(request: Request):
         if not result_lines and err:
             result_lines = ["[journalctl] " + err.decode(errors="replace").strip()]
         return JSONResponse({"lines": result_lines})
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return JSONResponse({"error": "timeout"}, status_code=504)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

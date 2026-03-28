@@ -1,0 +1,61 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python 3.14
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: Ruff check
+        run: |
+          uv sync --group dev
+          uv run ruff check .
+
+      - name: Build binary
+        run: uv run pyinstaller streammonitor.spec --noconfirm --clean
+
+      - name: Get version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Package release zip
+        run: |
+          mkdir -p StreamMonitor-${{ steps.version.outputs.tag }}
+          # Copy repo contents (respecting .gitignore patterns)
+          git archive HEAD | tar -x -C StreamMonitor-${{ steps.version.outputs.tag }}
+          # Copy compiled binary into the package
+          cp dist/streammonitor StreamMonitor-${{ steps.version.outputs.tag }}/
+          # Create zip
+          zip -r StreamMonitor-${{ steps.version.outputs.tag }}.zip StreamMonitor-${{ steps.version.outputs.tag }}/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: StreamMonitor ${{ steps.version.outputs.tag }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/streammonitor
+            StreamMonitor-${{ steps.version.outputs.tag }}.zip
+          generate_release_notes: true

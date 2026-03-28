@@ -2,24 +2,26 @@
 Comprehensive log error scanner.
 Each service has a custom classifier that understands its exact log format.
 """
+
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import re
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import config as cfg
 
-SCAN_INTERVAL = 120   # seconds between scans
-MAX_ERRORS    = 2000  # rolling history cap
+SCAN_INTERVAL = 120  # seconds between scans
+MAX_ERRORS = 2000  # rolling history cap
 
 error_history: deque[dict] = deque(maxlen=MAX_ERRORS)
 last_scan_ts: float = 0.0
-scan_count:   int   = 0
+scan_count: int = 0
 
 # ── Noise suppression: lines we always skip ────────────────────────────────────
 _GLOBAL_SKIP = re.compile(
@@ -49,25 +51,24 @@ _GLOBAL_SKIP = re.compile(
     re.IGNORECASE,
 )
 
-_SKIP_JOURNAL_NOISE = re.compile(
-    r"^-- (Logs begin|No entries|Journal begins)|^Hint:|^No journal files"
-)
+_SKIP_JOURNAL_NOISE = re.compile(r"^-- (Logs begin|No entries|Journal begins)|^Hint:|^No journal files")
 
 
 # ── Timestamp extractor ────────────────────────────────────────────────────────
+
 
 def _extract_ts(journal_line: str, fallback: float) -> float:
     """Extract Unix timestamp from journalctl --output=short-iso prefix.
     Format: 2026-03-27T20:15:20+0000 hostname service[pid]: message
     """
-    m = re.match(r'^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{4}|Z))', journal_line)
+    m = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{4}|Z))", journal_line)
     if m:
         try:
             s = m.group(1)
             # Normalize: +0700 → +07:00, Z → +00:00
-            s = re.sub(r'([+-])(\d{2})(\d{2})$', r'\1\2:\3', s)
-            if s.endswith('Z'):
-                s = s[:-1] + '+00:00'
+            s = re.sub(r"([+-])(\d{2})(\d{2})$", r"\1\2:\3", s)
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
             return datetime.fromisoformat(s).timestamp()
         except Exception:
             pass
@@ -76,13 +77,16 @@ def _extract_ts(journal_line: str, fallback: float) -> float:
 
 # ── Per-service classifiers ────────────────────────────────────────────────────
 
+
 def _classify_arrstack(line: str) -> tuple[str, str] | None:
     """Radarr / Sonarr / Lidarr / Prowlarr — NLog format: [Level] Component: msg"""
     m = re.search(r"\[(Warn|Error|Fatal|Debug|Trace)\]", line, re.IGNORECASE)
     if m:
         lvl = m.group(1).lower()
-        if lvl in ("error", "fatal"):  return "error",   "arrstack"
-        if lvl == "warn":              return "warning",  "arrstack"
+        if lvl in ("error", "fatal"):
+            return "error", "arrstack"
+        if lvl == "warn":
+            return "warning", "arrstack"
     # NLog SQLite errors embedded in full timestamp lines
     if re.search(r"SQLite (error|Error)\s*\(\d+\)", line):
         return "error", "arrstack"
@@ -116,7 +120,8 @@ def _classify_mediafusion(line: str) -> tuple[str, str] | None:
     m = re.match(r"^(ERROR|WARNING|CRITICAL|WARN|FATAL)::", line, re.IGNORECASE)
     if m:
         lvl = m.group(1).upper()
-        if lvl in ("ERROR", "CRITICAL", "FATAL"): return "error",   "mediafusion"
+        if lvl in ("ERROR", "CRITICAL", "FATAL"):
+            return "error", "mediafusion"
         return "warning", "mediafusion"
     # Python tracebacks
     if re.search(r"^Traceback \(most recent call last\)|^\s+File \".*\.py\", line \d+", line):
@@ -131,7 +136,8 @@ def _classify_bazarr(line: str) -> tuple[str, str] | None:
     m = re.search(r":\s+(ERROR|WARNING|CRITICAL|WARN)\s+\(", line, re.IGNORECASE)
     if m:
         lvl = m.group(1).upper()
-        if lvl in ("ERROR", "CRITICAL"): return "error",   "bazarr"
+        if lvl in ("ERROR", "CRITICAL"):
+            return "error", "bazarr"
         return "warning", "bazarr"
     if re.search(r"Traceback|Exception:|Error:", line):
         return "error", "bazarr"
@@ -143,8 +149,10 @@ def _classify_jackett(line: str) -> tuple[str, str] | None:
     m = re.match(r"\d{2}-\d{2} \d{2}:\d{2}:\d{2} (Error|Warn|Fatal|Debug|Info)", line, re.IGNORECASE)
     if m:
         lvl = m.group(1).lower()
-        if lvl in ("error", "fatal"): return "error",   "jackett"
-        if lvl == "warn":             return "warning",  "jackett"
+        if lvl in ("error", "fatal"):
+            return "error", "jackett"
+        if lvl == "warn":
+            return "warning", "jackett"
     # C# stack traces
     if re.search(r"^\s+at Jackett\.", line):
         return "error", "jackett"
@@ -161,8 +169,10 @@ def _classify_jellyfin(line: str) -> tuple[str, str] | None:
     m = re.search(r"\[(ERR|WRN|CRT|FTL)\]", line, re.IGNORECASE)
     if m:
         lvl = m.group(1).upper()
-        if lvl in ("ERR", "CRT", "FTL"): return "error",   "jellyfin"
-        if lvl == "WRN":                  return "warning",  "jellyfin"
+        if lvl in ("ERR", "CRT", "FTL"):
+            return "error", "jellyfin"
+        if lvl == "WRN":
+            return "warning", "jellyfin"
     # .NET exception patterns
     if re.search(r"\b(Exception|StackOverflow|OutOfMemory|NullReference)\b", line):
         return "error", "jellyfin"
@@ -174,8 +184,10 @@ def _classify_zilean(line: str) -> tuple[str, str] | None:
     m = re.search(r"\|\s*(WARN|ERR|CRIT|ERROR|FATAL)\s*\|", line, re.IGNORECASE)
     if m:
         lvl = m.group(1).upper()
-        if lvl in ("ERR", "ERROR", "CRIT", "FATAL"): return "error",   "zilean"
-        if lvl == "WARN":                             return "warning",  "zilean"
+        if lvl in ("ERR", "ERROR", "CRIT", "FATAL"):
+            return "error", "zilean"
+        if lvl == "WARN":
+            return "warning", "zilean"
     if re.search(r"\b(Exception|Error):", line):
         return "error", "zilean"
     return None
@@ -186,19 +198,20 @@ def _classify_stremthru(line: str) -> tuple[str, str] | None:
     try:
         obj = json.loads(line)
         lvl = obj.get("level", "").upper()
-        msg = obj.get("msg", "")
         err = obj.get("error", {})
         # Skip our own monitoring noise
         if isinstance(err, dict) and err.get("message") == "missing store":
             return None
-        if lvl == "ERROR":                          return "error",   "stremthru"
+        if lvl == "ERROR":
+            return "error", "stremthru"
         if lvl in ("WARN", "WARNING"):
             # Skip the expected 400 for our unauthed /v0/store/user poll
             if isinstance(err, dict) and err.get("status_code") == 400 and "missing store" in err.get("message", ""):
                 return None
             return "warning", "stremthru"
-        if lvl in ("FATAL", "PANIC"):               return "error",   "stremthru"
-    except (json.JSONDecodeError, TypeError):
+        if lvl in ("FATAL", "PANIC"):
+            return "error", "stremthru"
+    except json.JSONDecodeError, TypeError:
         pass
     # Fallback plain-text
     if re.search(r'"level"\s*:\s*"(ERROR|FATAL|PANIC)"', line):
@@ -228,7 +241,8 @@ def _classify_dispatcharr(line: str) -> tuple[str, str] | None:
     m = re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ (ERROR|WARNING|CRITICAL|WARN)\b", line, re.IGNORECASE)
     if m:
         lvl = m.group(1).upper()
-        if lvl in ("ERROR", "CRITICAL"): return "error",   "dispatcharr"
+        if lvl in ("ERROR", "CRITICAL"):
+            return "error", "dispatcharr"
         return "warning", "dispatcharr"
     if re.search(r"Traceback|Exception:|django\.db\.utils|IntegrityError", line):
         return "error", "dispatcharr"
@@ -240,7 +254,8 @@ def _classify_flaresolverr(line: str) -> tuple[str, str] | None:
     m = re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (ERROR|WARNING|CRITICAL)\b", line, re.IGNORECASE)
     if m:
         lvl = m.group(1).upper()
-        if lvl in ("ERROR", "CRITICAL"): return "error",   "flaresolverr"
+        if lvl in ("ERROR", "CRITICAL"):
+            return "error", "flaresolverr"
         return "warning", "flaresolverr"
     if re.search(r"Traceback|Error solving|challenge failed|browser.*crash", line, re.IGNORECASE):
         return "error", "flaresolverr"
@@ -273,22 +288,22 @@ def _classify_generic(line: str, sid: str) -> tuple[str, str] | None:
 
 # Map service id → classifier function
 _CLASSIFIERS: dict[str, object] = {
-    "comet":        _classify_comet,
-    "mediafusion":  _classify_mediafusion,
-    "stremthru":    _classify_stremthru,
-    "zilean":       _classify_zilean,
-    "aiostreams":   _classify_aiostreams,
-    "radarr":       _classify_arrstack,
-    "sonarr":       _classify_arrstack,
-    "lidarr":       _classify_arrstack,
-    "prowlarr":     _classify_arrstack,
-    "bazarr":       _classify_bazarr,
-    "jackett":      _classify_jackett,
-    "jellyfin":     _classify_jellyfin,
+    "comet": _classify_comet,
+    "mediafusion": _classify_mediafusion,
+    "stremthru": _classify_stremthru,
+    "zilean": _classify_zilean,
+    "aiostreams": _classify_aiostreams,
+    "radarr": _classify_arrstack,
+    "sonarr": _classify_arrstack,
+    "lidarr": _classify_arrstack,
+    "prowlarr": _classify_arrstack,
+    "bazarr": _classify_bazarr,
+    "jackett": _classify_jackett,
+    "jellyfin": _classify_jellyfin,
     "flaresolverr": _classify_flaresolverr,
-    "byparr":       _classify_flaresolverr,
-    "dispatcharr":  _classify_dispatcharr,
-    "streammonitor":_classify_streammonitor,
+    "byparr": _classify_flaresolverr,
+    "dispatcharr": _classify_dispatcharr,
+    "streammonitor": _classify_streammonitor,
 }
 
 
@@ -306,6 +321,7 @@ _PLEX_ERR_PAT = re.compile(
     re.IGNORECASE,
 )
 
+
 async def _scan_plex_files(since: float) -> list[dict]:
     """Scan Plex log files (not journald) since a given mtime threshold."""
     found: list[dict] = []
@@ -321,8 +337,20 @@ async def _scan_plex_files(since: float) -> list[dict]:
                     if _GLOBAL_SKIP.search(line):
                         continue
                     if _PLEX_ERR_PAT.search(line):
-                        sev = "error" if re.search(r"\b(ERROR|CRITICAL|Exception|crash)\b", line, re.IGNORECASE) else "warning"
-                        found.append({"sid": "plex", "unit": "plex-log", "line": line.strip()[:400], "severity": sev, "ts": time.time()})
+                        sev = (
+                            "error"
+                            if re.search(r"\b(ERROR|CRITICAL|Exception|crash)\b", line, re.IGNORECASE)
+                            else "warning"
+                        )
+                        found.append(
+                            {
+                                "sid": "plex",
+                                "unit": "plex-log",
+                                "line": line.strip()[:400],
+                                "severity": sev,
+                                "ts": time.time(),
+                            }
+                        )
             except Exception:
                 pass
     except Exception:
@@ -335,13 +363,19 @@ async def _scan_unit(sid: str, unit: str, since: str) -> list[dict]:
     found: list[dict] = []
     try:
         proc = await asyncio.create_subprocess_exec(
-            "sudo", "journalctl", "-u", unit,
-            "--since", since,
-            "--no-pager", "--output=short-iso",
+            "sudo",
+            "journalctl",
+            "-u",
+            unit,
+            "--since",
+            since,
+            "--no-pager",
+            "--output=short-iso",
             # No -p filter: many apps log everything at INFO journald priority
             # but embed their own level in the message (Comet, AIOStreams, etc.)
             # Limit lines to avoid overwhelming the scanner
-            "-n", "2000",
+            "-n",
+            "2000",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -366,23 +400,31 @@ async def _scan_unit(sid: str, unit: str, since: str) -> list[dict]:
                 if not nxt:
                     break
                 # If next line looks like a continuation (stack frame, indented, JSON fragment)
-                if (nxt.startswith("   ") or nxt.startswith("\t") or
-                        nxt.startswith("at ") or "at Jackett." in nxt or
-                        "at Radarr." in nxt or "at Sonarr." in nxt or
-                        nxt.startswith("null,") or nxt.startswith("}")):
+                if (
+                    nxt.startswith("   ")
+                    or nxt.startswith("\t")
+                    or nxt.startswith("at ")
+                    or "at Jackett." in nxt
+                    or "at Radarr." in nxt
+                    or "at Sonarr." in nxt
+                    or nxt.startswith("null,")
+                    or nxt.startswith("}")
+                ):
                     context_parts.append(nxt)
                     i += 1
                 else:
                     break
             full_line = " ↵ ".join(context_parts)[:600]
             entry_ts = _extract_ts(line, time.time())
-            found.append({
-                "sid":      sid,
-                "unit":     unit,
-                "line":     full_line,
-                "severity": sev,
-                "ts":       entry_ts,
-            })
+            found.append(
+                {
+                    "sid": sid,
+                    "unit": unit,
+                    "line": full_line,
+                    "severity": sev,
+                    "ts": entry_ts,
+                }
+            )
     except Exception:
         pass
     return found
@@ -409,17 +451,17 @@ async def scan_all() -> int:
     global last_scan_ts, scan_count
 
     if last_scan_ts:
-        since_dt  = datetime.fromtimestamp(last_scan_ts - 10, timezone.utc)
+        since_dt = datetime.fromtimestamp(last_scan_ts - 10, UTC)
         since_str = since_dt.strftime("%Y-%m-%d %H:%M:%S")
-        since_ts  = last_scan_ts - 10
+        since_ts = last_scan_ts - 10
     else:
         since_str = "30 minutes ago"
-        since_ts  = time.time() - 1800
+        since_ts = time.time() - 1800
 
     scan_time = time.time()
 
-    tasks   = []
-    sids    = []
+    tasks = []
+    sids = []
     for sid, svc in cfg.SERVICES.items():
         unit = svc.get("unit")
         if unit and sid != "plex":
@@ -458,7 +500,7 @@ async def scan_all() -> int:
             new_count += 1
 
     last_scan_ts = scan_time
-    scan_count  += 1
+    scan_count += 1
     return new_count
 
 
@@ -471,11 +513,9 @@ def clear_errors() -> None:
 async def error_scan_loop() -> None:
     await asyncio.sleep(45)
     while True:
-        try:
+        with contextlib.suppress(Exception):
             await scan_all()
-        except Exception:
-            pass
         await asyncio.sleep(SCAN_INTERVAL)
 
 
-__all__ = ["error_history", "error_scan_loop", "scan_all", "clear_errors", "last_scan_ts", "scan_count"]
+__all__ = ["clear_errors", "error_history", "error_scan_loop", "last_scan_ts", "scan_all", "scan_count"]

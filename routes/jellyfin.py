@@ -1,12 +1,12 @@
 """Jellyfin sessions and activity log."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-
 
 import config as cfg
 
@@ -26,7 +26,7 @@ async def api_jellyfin(request: Request):
             pass
 
         try:
-            since = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
+            since = (datetime.now(UTC) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
             r = await client.get(
                 f"{cfg.JELLYFIN_URL}/System/ActivityLog/Entries",
                 params={"minDate": since, "limit": "50"},

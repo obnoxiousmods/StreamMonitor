@@ -82,16 +82,29 @@ Built into the login page and available as a standalone tab:
 
 ```
 streammonitor/
-├── app.py                  # Main dashboard, auth, frontend (Starlette)
+├── app.py                  # Routes, auth, Jinja2 template rendering (Starlette)
 ├── main.py                 # Entry point (uvicorn)
 ├── config.py               # Service definitions, API keys
 ├── health.py               # Dual health check loop (systemd + HTTP)
 ├── errors.py               # Log error scanner with 20 classifiers
 ├── perms.py                # Permission scanner (94 paths)
+├── templates/              # Jinja2 HTML templates
+│   ├── dashboard.html      # Main dashboard UI
+│   ├── login.html          # Login page with speed test + service status
+│   └── speedtest.html      # Standalone speed test page
+├── static/                 # Static assets (CSS, JS)
+│   ├── css/
+│   │   ├── main.css        # Dashboard styles
+│   │   ├── login.css       # Login page styles
+│   │   └── speedtest.css   # Speed test styles
+│   └── js/
+│       ├── dashboard.js    # Dashboard logic (~1000 lines)
+│       ├── login.js        # Login page speed test + service status
+│       └── speedtest.js    # Standalone speed test logic
 ├── routes/                 # Modular API routes
 │   ├── benchmark.py        # Benchmark system (39 titles, 8 endpoints)
 │   ├── jellyfin.py         # Jellyfin sessions and activity
-│   ├── speedtest.py        # Speed test page and download endpoint
+│   ├── speedtest.py        # Speed test download endpoint + page route
 │   ├── public.py           # Unauthenticated health API
 │   └── dmesg.py            # Kernel log endpoint
 ├── stats/                  # Stats collection system
@@ -101,11 +114,9 @@ streammonitor/
 │   ├── github.py           # GitHub release version fetcher
 │   └── system.py           # System stats (CPU, RAM, disk, GPU, sensors)
 ├── data/                   # Runtime data (gitignored)
-│   ├── config.json         # Session secret
 │   ├── apikeys.json        # API keys (editable via Settings tab)
 │   └── monitor_pw_hash.txt # Argon2 password hash
-├── .env.example            # Environment variable template
-├── pyproject.toml          # Python project manifest
+├── pyproject.toml          # Python project manifest + ruff config
 └── streammonitor.spec      # PyInstaller build config
 ```
 
@@ -228,6 +239,16 @@ See `.env.example` for all configurable variables.
 uv pip install pyinstaller
 uv run pyinstaller streammonitor.spec --noconfirm --clean
 # Output: dist/streammonitor (14MB standalone binary)
+```
+
+### Linting
+
+The project uses [Ruff](https://docs.astral.sh/ruff/) for linting and formatting with zero ignored rules:
+
+```bash
+ruff check .        # Lint
+ruff format .       # Format
+ruff check --fix .  # Auto-fix
 ```
 
 ---

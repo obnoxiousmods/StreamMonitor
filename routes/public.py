@@ -1,4 +1,5 @@
 """Public API: no auth required. Exposes service health summary."""
+
 from __future__ import annotations
 
 from starlette.requests import Request
@@ -21,9 +22,11 @@ async def api_public(request: Request):
     total = len(services)
     up = sum(1 for s in services.values() if s["ok"])
 
-    return JSONResponse({
-        "services": services,
-        "total": total,
-        "up": up,
-        "down": total - up,
-    })
+    return JSONResponse(
+        {
+            "services": services,
+            "total": total,
+            "up": up,
+            "down": total - up,
+        }
+    )

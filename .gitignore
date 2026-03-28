@@ -2,29 +2,48 @@
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
 .venv/
+venv/
+env/
 *.egg-info/
+*.egg
+.eggs/
 
 # Runtime data
 data/
 *.db
 *.sqlite
+*.sqlite3
 
-# Environment
+# Environment / Secrets
 .env
+.env.*
+*.pem
+*.key
+apikeys.json
+monitor_pw_hash.txt
 
-# IDE
+# IDE / Editor
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+*.bak
+.project
+.classpath
+.settings/
 
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
+._*
+.Spotlight-V100
+.Trashes
 
-# UV
+# UV / pip
 .python-version
 uv.lock
 
@@ -32,3 +51,23 @@ uv.lock
 build/
 dist/
 *.spec
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Node (if any frontend tooling)
+node_modules/
+
+# Misc
+*.bak
+*.tmp
+*.temp
+.cache/
