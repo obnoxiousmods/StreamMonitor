@@ -27,7 +27,14 @@ if _HAS_PSUTIL:
     import psutil as _p
 
     with contextlib.suppress(Exception):
-        _prev_disk_io = _p.disk_io_counters()
+        _pd = _p.disk_io_counters(perdisk=True)
+        _PART_SEED = re.compile(r"(sd[a-z]+|nvme\d+n\d+)$")
+        _wd = {k: v for k, v in _pd.items() if _PART_SEED.match(k)}
+        if _wd:
+            _prev_disk_io = type("DIO", (), {
+                "read_bytes": sum(v.read_bytes for v in _wd.values()),
+                "write_bytes": sum(v.write_bytes for v in _wd.values()),
+            })()
     try:
         _VIRT_INIT = re.compile(r"^(lo|docker|veth|br-|virbr|tun|tap)")
         _nic_init = _p.net_io_counters(pernic=True)
@@ -168,31 +175,32 @@ def _collect_system_sync() -> dict:
         except Exception:
             pass
 
-        # ── Disk I/O rates ──
+        # ── Disk I/O rates (whole disks only, skip partitions to avoid double-counting) ──
         try:
-            dio = psutil.disk_io_counters()
-            if dio and _prev_disk_io is not None and _prev_io_time > 0:
-                dt = now - _prev_io_time
-                # Require at least 2 seconds between samples to avoid
-                # division-by-tiny-dt spikes (normal interval is ~60 s).
-                if dt >= 2.0:
-                    delta_read = dio.read_bytes - _prev_disk_io.read_bytes
-                    delta_write = dio.write_bytes - _prev_disk_io.write_bytes
-                    rb = max(0.0, delta_read / dt)
-                    wb = max(0.0, delta_write / dt)
-                    result["disk_io"] = {
-                        "read_rate": _fmt_rate(rb),
-                        "write_rate": _fmt_rate(wb),
-                        "read_bytes_s": round(rb),
-                        "write_bytes_s": round(wb),
-                        "read_total_gb": round(dio.read_bytes / 1024**3, 2),
-                        "write_total_gb": round(dio.write_bytes / 1024**3, 2),
-                    }
+            per_disk = psutil.disk_io_counters(perdisk=True)
+            # Filter to whole-disk devices only (e.g. sda, nvme0n1 — not sda1, nvme0n1p2)
+            _PART_RE = re.compile(r"(sd[a-z]+|nvme\d+n\d+)$")
+            whole = {k: v for k, v in per_disk.items() if _PART_RE.match(k)}
+            if whole:
+                total_read = sum(v.read_bytes for v in whole.values())
+                total_write = sum(v.write_bytes for v in whole.values())
+                dio = type("DIO", (), {"read_bytes": total_read, "write_bytes": total_write})()
+                if _prev_disk_io is not None and _prev_io_time > 0:
+                    dt = now - _prev_io_time
+                    if dt >= 2.0:
+                        rb = max(0.0, (dio.read_bytes - _prev_disk_io.read_bytes) / dt)
+                        wb = max(0.0, (dio.write_bytes - _prev_disk_io.write_bytes) / dt)
+                        result["disk_io"] = {
+                            "read_rate": _fmt_rate(rb),
+                            "write_rate": _fmt_rate(wb),
+                            "read_bytes_s": round(rb),
+                            "write_bytes_s": round(wb),
+                            "read_total_gb": round(dio.read_bytes / 1024**3, 2),
+                            "write_total_gb": round(dio.write_bytes / 1024**3, 2),
+                        }
+                        _prev_disk_io = dio
+                else:
                     _prev_disk_io = dio
-                # If dt < 2 s, keep the old prev values for next iteration
-            else:
-                # First sample: seed prev without emitting a rate
-                _prev_disk_io = dio
         except Exception:
             pass
 

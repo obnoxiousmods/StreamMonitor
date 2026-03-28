@@ -103,6 +103,22 @@ function renderSystem(s){
       h+=sysBar(cpu.usage_pct,c);
     }
     if(cpu.load_1m!=null)h+=sysR('Load (1/5/15m)',`${cpu.load_1m} / ${cpu.load_5m} / ${cpu.load_15m}`);
+    // CPU temps from hwmon
+    const temps=s.temps||{};
+    if(temps.cpu!=null){
+      const tc=temps.cpu>80?'err':temps.cpu>60?'warn':'ok';
+      h+=sysR('Temp',`${temps.cpu}°C`,tc);
+      if(temps.cores&&temps.cores.length>1){
+        const coreStr=temps.cores.map(t=>{const cc=t>80?'var(--err)':t>60?'var(--warn)':'var(--ok)';return`<span style="color:${cc}">${t}°</span>`;}).join(' ');
+        h+=`<div style="font-size:.58rem;color:var(--muted2);margin:-.1rem 0 .15rem;line-height:1.4">Cores: ${coreStr}</div>`;
+      }
+    }
+    // CPU fan RPM from psutil sensors
+    const fans=(s.sensors&&s.sensors.fans)||[];
+    if(fans.length){
+      const cpuFan=fans.find(f=>f.source==='nct6793'||f.source==='thinkpad'||f.source==='dell_smm')||fans[0];
+      if(cpuFan)h+=sysR('Fan',`${cpuFan.rpm} RPM`);
+    }
     h+='</div>';
   }
   // RAM
@@ -1050,6 +1066,19 @@ function renderBenchTable(d,append){
   }
   h+=`</tbody></table></div>`;
   if(append)el.innerHTML+=h; else el.innerHTML=h;
+}
+
+// ── API Explorer ──
+function toggleApi(el){el.classList.toggle('open')}
+async function tryApi(path, method='GET'){
+  const el = event.target.closest('.api-endpoint').querySelector('.api-response');
+  el.textContent = 'Loading...';
+  try {
+    const r = await fetch(path, {method});
+    const text = await r.text();
+    try { el.textContent = JSON.stringify(JSON.parse(text), null, 2); }
+    catch { el.textContent = text.slice(0, 2000); }
+  } catch(e) { el.textContent = 'Error: ' + e.message; }
 }
 
 // ── Init ──
