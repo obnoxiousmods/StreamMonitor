@@ -27,3 +27,8 @@ Thumbs.db
 # UV
 .python-version
 uv.lock
+
+# PyInstaller
+build/
+dist/
+*.spec
