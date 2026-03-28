@@ -11,7 +11,7 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-import config as cfg
+import core.config as cfg
 
 # ── Title dictionary ──────────────────────────────────────────────────────────
 TITLES = {

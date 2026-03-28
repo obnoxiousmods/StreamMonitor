@@ -7,7 +7,7 @@ import time
 
 import httpx
 
-import config as cfg
+import core.config as cfg
 from stats.base import _get, github_versions
 
 GITHUB_INTERVAL = 21600  # 6 hours
@@ -34,7 +34,7 @@ async def fetch_github_version(sid: str, repo: str) -> None:
 
 
 async def refresh_github_versions() -> None:
-    from config import GITHUB_REPOS
+    from core.config import GITHUB_REPOS
 
     tasks = [fetch_github_version(sid, repo) for sid, repo in GITHUB_REPOS.items()]
     await asyncio.gather(*tasks, return_exceptions=True)

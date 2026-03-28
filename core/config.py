@@ -10,10 +10,10 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 # ── Key store (loaded at import, mutated at runtime via /api/settings/keys) ──
-_KEY_FILE = Path(__file__).parent / "data" / "apikeys.json"
+_KEY_FILE = Path(__file__).parent.parent / "data" / "apikeys.json"
 
 
 def _load_keys() -> dict[str, str]:
@@ -220,7 +220,7 @@ if not PLEX_TOKEN:
         pass
 
 # ── URL store (loaded at import, mutated at runtime via /api/settings/urls) ──
-_URL_FILE = Path(__file__).parent / "data" / "urls.json"
+_URL_FILE = Path(__file__).parent.parent / "data" / "urls.json"
 
 
 def _load_urls() -> dict[str, str]:

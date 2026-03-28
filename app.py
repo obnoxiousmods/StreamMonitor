@@ -25,11 +25,11 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
-import config as cfg
-import errors as _errors
-import health as _health
-import logging_config  # noqa: F401 — side-effect import
-import perms as _perms
+import core.config as cfg
+import core.errors as _errors
+import core.health as _health
+import core.logging_config  # noqa: F401 — side-effect import
+import core.perms as _perms
 import stats as _stats
 from routes.benchmark import TITLES as BENCH_TITLES
 from routes.benchmark import api_benchmark

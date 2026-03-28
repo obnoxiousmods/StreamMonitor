@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.templating import Jinja2Templates
 
-import config as cfg
+import core.config as cfg
 
 _templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 

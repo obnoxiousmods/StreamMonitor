@@ -38,7 +38,7 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["config", "health", "logging_config", "stats", "errors", "perms", "routes"]
+known-first-party = ["core", "stats", "routes"]
 
 [tool.ruff.format]
 quote-style = "double"

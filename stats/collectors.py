@@ -12,7 +12,7 @@ from xml.etree import ElementTree as ET
 
 import httpx
 
-import config as cfg
+import core.config as cfg
 from stats.base import _get, _get_raw
 
 # ── Comet admin session cache ─────────────────────────────────────────────────

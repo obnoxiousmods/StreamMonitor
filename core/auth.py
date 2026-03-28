@@ -10,7 +10,7 @@ from argon2.exceptions import VerifyMismatchError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 
-import config as cfg
+import core.config as cfg
 
 # ── Auth config ───────────────────────────────────────────────────────────────
 SECRET_KEY = os.environ.get("MONITOR_SECRET", secrets.token_hex(32))

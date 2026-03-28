@@ -15,7 +15,7 @@ from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 
-import config as cfg
+import core.config as cfg
 
 logger = logging.getLogger(__name__)
 

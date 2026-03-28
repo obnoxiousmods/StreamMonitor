@@ -10,8 +10,8 @@ from datetime import UTC, datetime
 
 import httpx
 
-import config as _cfg
-from config import SERVICES
+import core.config as _cfg
+from core.config import SERVICES
 
 logger = logging.getLogger(__name__)
 

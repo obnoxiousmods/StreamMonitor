@@ -6,7 +6,7 @@ import logging.config
 import os
 from pathlib import Path
 
-_LOG_DIR = Path(__file__).parent / "logs"
+_LOG_DIR = Path(__file__).parent.parent / "logs"
 _LOG_DIR.mkdir(exist_ok=True)
 
 # ANSI colour codes for console output
