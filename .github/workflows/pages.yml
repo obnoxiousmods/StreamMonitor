@@ -26,15 +26,29 @@ jobs:
 
       - name: Build docs site
         run: |
-          mkdir -p _site
+          mkdir -p _site/screenshots
+
+          # Copy README as index
           cp README.md _site/index.md
-          cp -r docs/* _site/
-          cat > _site/_config.yml << 'EOF'
+
+          # Copy all docs
+          cp docs/*.md _site/
+
+          # Copy screenshots (referenced by README)
+          cp -r docs/screenshots/* _site/screenshots/ 2>/dev/null || true
+
+          # Fix image paths in index.md (docs/screenshots/ -> screenshots/)
+          sed -i 's|docs/screenshots/|screenshots/|g' _site/index.md
+
+          # Create Jekyll config
+          cat > _site/_config.yml << 'YAML'
           title: StreamMonitor
-          description: Infrastructure monitoring dashboard for self-hosted media streaming stacks
+          description: Real-time infrastructure monitoring for self-hosted media streaming stacks
           theme: jekyll-theme-midnight
           markdown: GFM
-          EOF
+          exclude:
+            - _config.yml
+          YAML
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

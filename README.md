@@ -2,148 +2,114 @@
 
 # StreamMonitor
 
-**Production-grade infrastructure monitoring dashboard for self-hosted media streaming stacks**
+**Real-time infrastructure monitoring for self-hosted media streaming stacks**
 
 [![Release](https://img.shields.io/github/v/release/obnoxiousmods/StreamMonitor?style=flat-square&color=7c5cff)](https://github.com/obnoxiousmods/StreamMonitor/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.14+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Ruff](https://img.shields.io/badge/linting-ruff-261230?style=flat-square)](https://docs.astral.sh/ruff/)
 
-Monitor, benchmark, and manage your entire debrid media stack from one beautiful dark-themed dashboard.
+Monitor, benchmark, and manage your entire debrid media stack from a single dark-themed dashboard.
 
 </div>
 
 ---
 
+## Screenshots
+
+<details open>
+<summary><b>Dashboard</b> — 23 services across 8 categories with SYS/HTTP badges, deep stats, and version tracking</summary>
+
+![Dashboard](docs/screenshots/dashboard.png)
+</details>
+
+<details>
+<summary><b>Login</b> — Glassmorphism card with speed test, service status, animated starfield</summary>
+
+![Login](docs/screenshots/login.png)
+</details>
+
+<details>
+<summary><b>API Explorer</b> — 24 interactive endpoints grouped by category with "Try it" buttons</summary>
+
+![API](docs/screenshots/api.png)
+</details>
+
+---
+
 ## Features
 
-### Service Health Monitoring
-- **Dual health checks** - systemd unit status + HTTP endpoint probing every 30 seconds
-- **23+ services** monitored across 8 categories: Streaming, Indexers, Arr Suite, Media, Downloads, Infrastructure
-- **Rolling history** - 120-entry health history per service with latency tracking
-- **Service controls** - Start/stop/restart services directly from the dashboard
+### Dual Health Checks
+- **systemd + HTTP** probing every 30 seconds with separate SYS/HTTP status badges
+- **23 services** across 8 categories: Streaming, Indexers, Arr Suite, Media, Downloads, Infrastructure
+- **120-entry** rolling history per service with latency tracking
+- **Service controls** — start/stop/restart directly from the dashboard
 
-### Enhanced Service Stats
-Deep API integration with per-service collectors running every 60 seconds:
+### Deep Stats Collection
+Per-service API collectors running every 60 seconds:
 
-| Service | Stats Collected |
-|---------|----------------|
-| **MediaFusion** | Streams, content (movies/series), scrapers (27 active), top torrent sources, debrid cache, Redis memory, DB size |
-| **Zilean** | 1.1M+ torrents indexed, IMDB match rate, quality distribution (1080p/4K/720p), DMM scraper status, DB size |
-| **StremThru** | Magnet cache (18K+ RD, 1K+ TB), torrent info count, DMM hashes, DB size |
-| **AIOStreams** | Users, catalogs, presets (73), forced debrid services, cache entries, TMDB availability, build info |
-| **Comet** | Version, scraper status, 24h found count, fail rate |
-| **Jellyfin** | Library counts, active sessions, playback info |
-| **Prowlarr** | Indexers, queries, grabs, failed queries, health warnings |
+| Service | Highlights |
+|---------|-----------|
+| **Comet** | 6M+ torrents, scraper status, 24h found count, fail rate, top trackers |
+| **MediaFusion** | 10K+ streams, 27 active scrapers, debrid cache, Redis/DB stats |
+| **Zilean** | 1.3M torrents, IMDB match rate, quality distribution, DMM scraper |
+| **StremThru** | 30K+ magnet cache, torrent info, DMM hashes |
+| **AIOStreams** | Users, catalogs, presets, forced services, TMDB, build info |
+| **Prowlarr** | Indexers, queries, grabs, health warnings |
 | **Radarr/Sonarr/Lidarr** | Library sizes, queue, disk space, health checks |
+| **Jellyfin/Plex** | Library counts, active sessions, now playing |
 
-### Benchmark Tab
-Compare your self-hosted stack against public instances:
+### System Monitoring
+- **CPU** — model, cores, clock, usage with progress bar, load averages, temperatures (per-core via hwmon)
+- **Memory** — used/total with progress bar, swap
+- **GPU** — AMD Radeon via sysfs: usage, VRAM, temp, power, fan RPM, clocks
+- **Storage** — per-mount disk usage with colored bars
+- **Disk I/O** — read/write rates (whole-disk only, no partition double-counting)
+- **Network** — recv/sent rates with link speed utilization, session totals
 
-- **8 endpoints tested**: Comet, Zilean, MediaFusion, StremThru Torz, AIOStreams (self-hosted) vs Torrentio, Torrentio P2P, TorBox (public)
-- **39 test titles** across 8 categories:
-  - Popular Movies (Dark Knight, Inception, Oppenheimer...)
-  - Niche Movies (Parasite, Spirited Away, Your Name...)
-  - Popular TV (Breaking Bad, Game of Thrones, Chernobyl...)
-  - Niche TV (The Wire, Black Mirror, Severance...)
-  - Popular Anime (Death Note, Demon Slayer, My Hero Academia...)
-  - Niche Anime (Steins;Gate, Hunter x Hunter, Made in Abyss...)
-  - TV Episodes (specific season/episode for series testing)
-- **Metrics**: Latency, stream count, resolution breakdown (4K/1080p/720p), codec detection
-- **Run All Titles** - aggregate comparison with expandable per-title details
+### Benchmark
+Compare self-hosted vs public instances across 39 test titles (movies, TV, anime):
+- **8 endpoints** tested with latency, stream count, resolution breakdown (4K/1080p/720p)
+- **Run All** for aggregate comparison
 
 ### Speed Test
-Built into the login page and available as a standalone tab:
-- **Direct** (origin server) vs **Cloudflare** (CDN) download comparison
-- Animated progress bars with real-time Mbps calculation
-- Configurable test sizes: 10 MB to 500 MB
-- Rate limiting: 6 tests per 10 minutes per IP
-- 1 Gbps throttle cap
+Built into the login page and standalone tab:
+- **Direct vs Cloudflare** download comparison
+- 10 MB to 500 MB test sizes, rate-limited (20/10min)
 
-### Additional Features
-- **Live Logs** - streaming journalctl viewer with unit selection and text filtering
-- **Error Scanner** - automated log scanning every 2 minutes with service-specific classifiers and dedup
-- **Permission Scanner** - scan and bulk-fix ownership/permissions across 94 critical paths
-- **Jellyfin Tab** - active sessions (who's watching what) and recent activity log
-- **Kernel Logs** - dmesg endpoint for system-level debugging
-- **GitHub Version Tracking** - compares installed vs latest release for 20+ services
-- **GPU Monitoring** - AMD Radeon stats via sysfs (usage, VRAM, temp, power, fan)
-- **System Stats** - CPU, RAM, disk I/O, network I/O, sensors, temperatures
-
-### UI
-- Modern dark theme (#060818 background, #7c5cff accent)
-- Glassmorphism login card with animated starfield background
-- Service cards with color-coded KV pairs and responsive grid layout
-- Collapsible service modals with live logs and controls
-- Real-time 30-second auto-refresh
+### More
+- **Live Logs** — streaming journalctl with filtering
+- **Error Scanner** — automated scanning with 20 service-specific classifiers
+- **Permission Scanner** — scan and fix 94+ critical paths
+- **Interactive API Explorer** — 24 endpoints with "Try it" buttons
+- **Version Tracking** — installed vs latest GitHub release for 20+ services
+- **Settings UI** — manage API keys, service URLs, and password from the dashboard
 
 ---
 
-## Architecture
+## Quick Start
 
-```
-streammonitor/
-├── app.py                  # Routes, auth, Jinja2 template rendering (Starlette)
-├── main.py                 # Entry point (uvicorn)
-├── config.py               # Service definitions, API keys
-├── health.py               # Dual health check loop (systemd + HTTP)
-├── errors.py               # Log error scanner with 20 classifiers
-├── perms.py                # Permission scanner (94 paths)
-├── templates/              # Jinja2 HTML templates
-│   ├── dashboard.html      # Main dashboard UI
-│   ├── login.html          # Login page with speed test + service status
-│   └── speedtest.html      # Standalone speed test page
-├── static/                 # Static assets (CSS, JS)
-│   ├── css/
-│   │   ├── main.css        # Dashboard styles
-│   │   ├── login.css       # Login page styles
-│   │   └── speedtest.css   # Speed test styles
-│   └── js/
-│       ├── dashboard.js    # Dashboard logic (~1000 lines)
-│       ├── login.js        # Login page speed test + service status
-│       └── speedtest.js    # Standalone speed test logic
-├── routes/                 # Modular API routes
-│   ├── benchmark.py        # Benchmark system (39 titles, 8 endpoints)
-│   ├── jellyfin.py         # Jellyfin sessions and activity
-│   ├── speedtest.py        # Speed test download endpoint + page route
-│   ├── public.py           # Unauthenticated health API
-│   └── dmesg.py            # Kernel log endpoint
-├── stats/                  # Stats collection system
-│   ├── __init__.py         # Collection orchestrator (60s interval)
-│   ├── collectors.py       # 19 per-service API collectors
-│   ├── base.py             # Shared HTTP helpers (httpx)
-│   ├── github.py           # GitHub release version fetcher
-│   └── system.py           # System stats (CPU, RAM, disk, GPU, sensors)
-├── data/                   # Runtime data (gitignored)
-│   ├── apikeys.json        # API keys (editable via Settings tab)
-│   └── monitor_pw_hash.txt # Argon2 password hash
-├── pyproject.toml          # Python project manifest + ruff config
-└── streammonitor.spec      # PyInstaller build config
-```
-
----
-
-## Installation
-
-### Option 1: Pre-built Binary (Linux x86_64)
+### Binary (Linux x86_64)
 
 ```bash
-wget https://github.com/obnoxiousmods/StreamMonitor/releases/latest/download/streammonitor
-chmod +x streammonitor
+wget https://github.com/obnoxiousmods/StreamMonitor/releases/latest/download/StreamMonitor.zip
+unzip StreamMonitor.zip
+cd StreamMonitor-*/
 ./streammonitor
-# Runs on http://127.0.0.1:9090
-# Default login: admin / admin
+# http://127.0.0.1:9090 — login: admin / admin
 ```
 
-### Option 2: From Source
+### From Source
 
 ```bash
 git clone https://github.com/obnoxiousmods/StreamMonitor.git
 cd StreamMonitor
+cp .env.example .env  # Edit with your API keys and URLs
 uv sync
 uv run uvicorn app:app --host 127.0.0.1 --port 9090
 ```
 
-### Option 3: systemd Service
+### systemd Service
 
 ```ini
 [Unit]
@@ -157,105 +123,128 @@ Group=media
 WorkingDirectory=/path/to/StreamMonitor
 ExecStart=uv run uvicorn app:app --host 127.0.0.1 --port 9090 --log-level info
 Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-### First Login
-
-Default credentials: `admin` / `admin`
-
-Change the password immediately via the **Settings** tab.
-
 ---
 
 ## Configuration
 
-### API Keys
+### `.env` File (Recommended)
 
-Configure via the **Settings** tab in the UI, or edit `data/apikeys.json` directly:
+Copy `.env.example` to `.env` and fill in your values. The file is auto-loaded at startup.
 
-```json
-{
-  "jellyfin_api_key": "your-key",
-  "prowlarr_api_key": "your-key",
-  "radarr_api_key": "your-key",
-  "sonarr_api_key": "your-key",
-  "mediafusion_email": "admin@example.com",
-  "mediafusion_password": "your-password"
-}
+```bash
+# API Keys
+PROWLARR_API_KEY=your-key
+RADARR_API_KEY=your-key
+JELLYFIN_API_KEY=your-key
+
+# Speed Test URLs
+SPEEDTEST_DIRECT_URL=https://speedtest.example.com/speedtest/download
+SPEEDTEST_CF_URL=https://speedtest-cf.example.com/speedtest/download
+
+# Session Secret
+MONITOR_SECRET=your-random-secret
 ```
 
-### Service Definitions
+### Settings UI
 
-Edit `config.py` to add/remove monitored services:
+API keys and service URLs can also be managed via the **Settings** tab in the dashboard. Changes are persisted to `data/apikeys.json` and `data/urls.json`.
+
+### Adding Services
+
+Edit `core/config.py`:
 
 ```python
-SERVICES = {
-    "myservice": {
-        "name": "My Service",
-        "unit": "myservice",           # systemd unit name
-        "url": "http://127.0.0.1:PORT/health",  # health endpoint
-        "ok": [200],                    # acceptable HTTP status codes
-        "category": "streaming",        # UI category
-    },
+SERVICES["myservice"] = {
+    "name": "My Service",
+    "unit": "myservice",                    # systemd unit
+    "url": "http://127.0.0.1:PORT/health",  # health endpoint
+    "ok": [200],                             # expected status codes
+    "headers": {"X-Api-Key": MY_KEY},        # optional auth
+    "category": "streaming",                 # UI grouping
 }
 ```
 
-### Environment Variables
+---
 
-See `.env.example` for all configurable variables.
+## Architecture
+
+```
+streammonitor/
+├── app.py                  # Starlette app, routes, Jinja2 rendering
+├── main.py                 # Entry point (uvicorn)
+├── core/                   # Core modules
+│   ├── config.py           # Service definitions, .env loading, API keys
+│   ├── auth.py             # Argon2id auth, session management
+│   ├── health.py           # Dual health check loop (30s)
+│   ├── errors.py           # Log scanner with 20 classifiers (120s)
+│   ├── perms.py            # Permission scanner (94 paths)
+│   └── logging_config.py   # Rotating file + colored console logging
+├── routes/                 # API route handlers
+│   ├── benchmark.py        # Stream resolution benchmark (39 titles)
+│   ├── jellyfin.py         # Sessions and activity
+│   ├── speedtest.py        # Speed test page + download endpoint
+│   ├── public.py           # Unauthenticated health API
+│   └── dmesg.py            # Kernel log endpoint
+├── stats/                  # Background stats collection (60s)
+│   ├── collectors.py       # 19 per-service API collectors
+│   ├── system.py           # CPU, RAM, disk, GPU, network, temps
+│   ├── github.py           # GitHub release version fetcher (6h)
+│   └── base.py             # Shared httpx helpers
+├── templates/              # Jinja2 HTML templates
+├── static/                 # CSS + JS (ESLint, Prettier, Stylelint)
+└── .env                    # Configuration (gitignored)
+```
 
 ---
 
-## API Endpoints
+## API
 
-| Endpoint | Auth | Description |
-|----------|------|-------------|
-| `GET /api/ping` | No | Liveness check |
-| `GET /api/public` | No | Service health summary |
-| `GET /api/status` | Yes | Full service health + history |
-| `GET /api/stats` | Yes | All service stats |
-| `GET /api/versions` | Yes | Installed vs latest versions |
-| `GET /api/logs/{unit}` | Yes | Journal log lines |
-| `GET /api/dmesg` | Yes | Kernel logs |
-| `GET /api/benchmark?imdb=tt0468569` | Yes | Run benchmark for a title |
-| `GET /api/jellyfin` | Yes | Jellyfin sessions + activity |
-| `GET /api/errors` | Yes | Scanned error history |
-| `POST /api/service/{unit}/{action}` | Yes | Start/stop/restart service |
-| `POST /api/perms/scan` | Yes | Scan directory permissions |
-| `POST /api/perms/fix` | Yes | Fix permissions |
-| `GET /speedtest` | Yes | Speed test page |
-| `GET /speedtest/download?mb=25` | No | Speed test download (rate-limited) |
+24 REST endpoints — see the interactive **API Explorer** tab in the dashboard, or [docs/API.md](docs/API.md).
+
+| Category | Endpoints |
+|----------|-----------|
+| **Health** | `GET /api/ping`, `/api/public`, `/api/status[/{id}]` |
+| **Stats** | `GET /api/stats[/{id}]`, `/api/versions` |
+| **Logs** | `GET /api/logs/{unit}`, `/api/dmesg`, `/api/errors` |
+| **Control** | `POST /api/service/{unit}/{action}`, `/api/errors/scan` |
+| **Settings** | `GET/POST /api/settings/keys`, `/api/settings/urls`, `POST /api/settings/password` |
+| **Tools** | `GET /api/benchmark`, `/api/jellyfin`, `/api/perms/scan` |
+| **Speed Test** | `GET /speedtest`, `/speedtest/download?mb=25` |
 
 ---
 
-## Building
+## Development
 
-### PyInstaller Binary
+### Linting
+
+```bash
+# Python
+ruff check .          # Lint (zero ignored rules)
+ruff format .         # Format
+
+# JavaScript / CSS
+npm run lint:js       # ESLint
+npm run lint:css      # Stylelint
+npm run format        # Prettier
+```
+
+### Building
 
 ```bash
 uv pip install pyinstaller
 uv run pyinstaller streammonitor.spec --noconfirm --clean
-# Output: dist/streammonitor (14MB standalone binary)
-```
-
-### Linting
-
-The project uses [Ruff](https://docs.astral.sh/ruff/) for linting and formatting with zero ignored rules:
-
-```bash
-ruff check .        # Lint
-ruff format .       # Format
-ruff check --fix .  # Auto-fix
+# Output: dist/streammonitor
 ```
 
 ---
 
 ## Stack Compatibility
-
-StreamMonitor is designed for self-hosted debrid media stacks. Out of the box it monitors:
 
 | Category | Services |
 |----------|----------|
@@ -265,8 +254,6 @@ StreamMonitor is designed for self-hosted debrid media stacks. Out of the box it
 | **Media** | Jellyfin, Plex, JellySeerr |
 | **Downloads** | qBittorrent |
 | **Infrastructure** | PostgreSQL, Redis/Valkey, PgBouncer |
-
-Add your own services by editing `config.py`.
 
 ---
 
