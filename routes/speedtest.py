@@ -8,6 +8,8 @@ from collections import defaultdict
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
 
+import config as cfg
+
 # ── Rate limiting: 2 tests per 10 minutes per IP ─────────────────────────────
 _rate: dict[str, list[float]] = defaultdict(list)
 _RATE_LIMIT = 6
@@ -162,8 +164,8 @@ select:focus{outline:none;border-color:#7c5cff}
 
 <script>
 const endpoints = [
-  { id: 'direct', label: 'Direct', url: 'https://speedtest.obby.ca/speedtest/download' },
-  { id: 'cf',     label: 'Cloudflare', url: 'https://speedtest.obnoxious.lol/speedtest/download' },
+  { id: 'direct', label: '{{SPEEDTEST_DIRECT_NAME}}', url: '{{SPEEDTEST_DIRECT_URL}}' },
+  { id: 'cf',     label: '{{SPEEDTEST_CF_NAME}}', url: '{{SPEEDTEST_CF_URL}}' },
 ];
 
 let running = false;
@@ -268,4 +270,8 @@ async function runAll() {
 
 async def speedtest_page(request: Request):
     """Serve the speed test HTML page."""
-    return HTMLResponse(_SPEEDTEST_HTML)
+    html = _SPEEDTEST_HTML.replace("{{SPEEDTEST_DIRECT_URL}}", cfg.SPEEDTEST_DIRECT_URL)
+    html = html.replace("{{SPEEDTEST_DIRECT_NAME}}", cfg.SPEEDTEST_DIRECT_NAME)
+    html = html.replace("{{SPEEDTEST_CF_URL}}", cfg.SPEEDTEST_CF_URL)
+    html = html.replace("{{SPEEDTEST_CF_NAME}}", cfg.SPEEDTEST_CF_NAME)
+    return HTMLResponse(html)

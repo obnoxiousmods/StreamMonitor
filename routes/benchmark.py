@@ -9,15 +9,7 @@ from datetime import datetime, timezone
 import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-import os
-
-# Benchmark endpoint config tokens (base64-encoded Stremio addon configs containing user credentials)
-# Set these via environment variables or leave empty to disable the corresponding benchmark endpoint.
-COMET_CONFIG       = os.environ.get("BENCH_COMET_CONFIG", "")
-MEDIAFUSION_CONFIG = os.environ.get("BENCH_MEDIAFUSION_CONFIG", "")
-STREMTHRU_CONFIG   = os.environ.get("BENCH_STREMTHRU_CONFIG", "")
-AIOSTREAMS_CONFIG  = os.environ.get("BENCH_AIOSTREAMS_CONFIG", "")
-TORRENTIO_RD_KEY   = os.environ.get("BENCH_TORRENTIO_RD_KEY", "")
+import config as cfg
 
 # ── Title dictionary ──────────────────────────────────────────────────────────
 TITLES = {
@@ -66,34 +58,34 @@ def _build_endpoints(imdb_raw: str):
         {
             "name": "Comet",
             "group": "self-hosted",
-            "url": f"http://127.0.0.1:8070/{COMET_CONFIG}/stream/{media_type}/{imdb_raw}.json",
+            "url": f"{cfg.COMET_URL}/{cfg.BENCH_COMET_CONFIG}/stream/{media_type}/{imdb_raw}.json",
         },
         {
             "name": "Zilean",
             "group": "self-hosted",
-            "url": f"http://127.0.0.1:8181/dmm/filtered?Query={zilean_query}&limit=100",
+            "url": f"{cfg.ZILEAN_URL}/dmm/filtered?Query={zilean_query}&limit=100",
             "zilean": True,
         },
         {
             "name": "MediaFusion",
             "group": "self-hosted",
-            "url": f"https://127.0.0.1:8090/{MEDIAFUSION_CONFIG}/stream/{media_type}/{imdb_raw}.json",
+            "url": f"{cfg.MEDIAFUSION_URL}/{cfg.BENCH_MEDIAFUSION_CONFIG}/stream/{media_type}/{imdb_raw}.json",
         },
         {
             "name": "StremThru Torz",
             "group": "self-hosted",
-            "url": f"http://127.0.0.1:8080/stremio/torz/{STREMTHRU_CONFIG}/stream/{media_type}/{imdb_raw}.json",
+            "url": f"{cfg.STREMTHRU_URL}/stremio/torz/{cfg.BENCH_STREMTHRU_CONFIG}/stream/{media_type}/{imdb_raw}.json",
         },
         {
             "name": "AIOStreams",
             "group": "self-hosted",
-            "url": f"http://127.0.0.1:7070/stremio/{AIOSTREAMS_CONFIG}/stream/{media_type}/{imdb_raw}.json",
+            "url": f"{cfg.AIOSTREAMS_URL}/stremio/{cfg.BENCH_AIOSTREAMS_CONFIG}/stream/{media_type}/{imdb_raw}.json",
         },
         # Public
         {
             "name": "Torrentio (RD)",
             "group": "public",
-            "url": f"https://torrentio.strem.fun/realdebrid={TORRENTIO_RD_KEY}/stream/{media_type}/{imdb_raw}.json",
+            "url": f"https://torrentio.strem.fun/realdebrid={cfg.BENCH_TORRENTIO_RD_KEY}/stream/{media_type}/{imdb_raw}.json",
         },
         {
             "name": "Torrentio P2P",

@@ -7,20 +7,19 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-_JF_URL = "http://127.0.0.1:8096"
+
 import config as cfg
-_JF_KEY = cfg.JELLYFIN_KEY
 
 
 async def api_jellyfin(request: Request):
     """Fetch active sessions and recent activity from Jellyfin."""
-    headers = {"X-Emby-Token": _JF_KEY}
+    headers = {"X-Emby-Token": cfg.JELLYFIN_KEY}
     sessions = []
     activity = []
 
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            r = await client.get(f"{_JF_URL}/Sessions", headers=headers)
+            r = await client.get(f"{cfg.JELLYFIN_URL}/Sessions", headers=headers)
             if r.status_code == 200:
                 sessions = r.json()
         except Exception:
@@ -29,7 +28,7 @@ async def api_jellyfin(request: Request):
         try:
             since = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
             r = await client.get(
-                f"{_JF_URL}/System/ActivityLog/Entries",
+                f"{cfg.JELLYFIN_URL}/System/ActivityLog/Entries",
                 params={"minDate": since, "limit": "50"},
                 headers=headers,
             )

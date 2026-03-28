@@ -300,7 +300,7 @@ def _classify_line(sid: str, line: str) -> tuple[str, str] | None:
 
 
 # ── Plex file-based log scanning ──────────────────────────────────────────────
-_PLEX_LOG_DIR = Path("/var/lib/plex/Plex Media Server/Logs")
+_PLEX_LOG_DIR = Path(cfg.PLEX_LOG_DIR)
 _PLEX_ERR_PAT = re.compile(
     r"\b(ERROR|WARN(ING)?|CRITICAL|Exception|crash|failed|unable to)\b",
     re.IGNORECASE,

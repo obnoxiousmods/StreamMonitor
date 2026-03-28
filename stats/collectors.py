@@ -29,7 +29,7 @@ async def _get_comet_session() -> str:
     try:
         async with httpx.AsyncClient(timeout=8, follow_redirects=False) as c:
             r = await c.post(
-                "http://127.0.0.1:8070/admin/login",
+                f"{cfg.COMET_URL}/admin/login",
                 content=f"password={cfg.COMET_ADMIN_PASS}",
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
@@ -62,7 +62,7 @@ async def _get_dispatcharr_token() -> str:
     try:
         async with httpx.AsyncClient(timeout=8) as c:
             r = await c.post(
-                "http://127.0.0.1:9191/api/accounts/token/",
+                f"{cfg.DISPATCHARR_API_URL}/api/accounts/token/",
                 json={"username": cfg.DISPATCHARR_USER, "password": cfg.DISPATCHARR_PASS},
             )
             if r.status_code == 200:
@@ -84,10 +84,10 @@ async def collect_comet() -> dict:
 
     async with httpx.AsyncClient(timeout=10) as c:
         manifest, metrics, connections, bg_status = await asyncio.gather(
-            _get(c, "http://127.0.0.1:8070/manifest.json"),
-            _get(c, "http://127.0.0.1:8070/admin/api/metrics", cookie_h),
-            _get(c, "http://127.0.0.1:8070/admin/api/connections", cookie_h),
-            _get(c, "http://127.0.0.1:8070/admin/api/background-scraper/status", cookie_h),
+            _get(c, f"{cfg.COMET_URL}/manifest.json"),
+            _get(c, f"{cfg.COMET_URL}/admin/api/metrics", cookie_h),
+            _get(c, f"{cfg.COMET_URL}/admin/api/connections", cookie_h),
+            _get(c, f"{cfg.COMET_URL}/admin/api/background-scraper/status", cookie_h),
             return_exceptions=True,
         )
     result: dict = {}
@@ -98,7 +98,7 @@ async def collect_comet() -> dict:
         global _comet_version
         if _comet_version is None:
             try:
-                with open("/home/comet/comet/CHANGELOG.md") as f:
+                with open(cfg.COMET_CHANGELOG) as f:
                     for line in f:
                         m = re.search(r"\[(\d+\.\d+\.\d+)\]", line)
                         if m:
@@ -153,7 +153,7 @@ async def _get_mf_token() -> str:
     try:
         async with httpx.AsyncClient(verify=False, timeout=10) as c:
             r = await c.post(
-                "https://127.0.0.1:8090/api/v1/auth/login",
+                f"{cfg.MEDIAFUSION_URL}/api/v1/auth/login",
                 json={"email": cfg.MEDIAFUSION_EMAIL, "password": cfg.MEDIAFUSION_USER_PASS},
                 headers={"X-API-Key": cfg.MEDIAFUSION_PASS},
             )
@@ -172,7 +172,7 @@ async def collect_mediafusion() -> dict:
         "X-API-Key": cfg.MEDIAFUSION_PASS,
         "Authorization": f"Bearer {token}",
     }
-    base = "https://127.0.0.1:8090"
+    base = cfg.MEDIAFUSION_URL
     async with httpx.AsyncClient(verify=False, timeout=10) as c:
         coros = [
             _get(c, f"{base}/api/v1/instance/info"),
@@ -284,9 +284,9 @@ async def collect_stremthru() -> dict:
     auth_h = {"Authorization": f"Basic {basic}"}
     async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
         health, mfest, store_user = await asyncio.gather(
-            _get(c, "http://127.0.0.1:8080/v0/health"),
-            _get(c, "http://127.0.0.1:8080/stremio/store/manifest.json"),
-            _get(c, "http://127.0.0.1:8080/v0/store/user", auth_h),
+            _get(c, f"{cfg.STREMTHRU_URL}/v0/health"),
+            _get(c, f"{cfg.STREMTHRU_URL}/stremio/store/manifest.json"),
+            _get(c, f"{cfg.STREMTHRU_URL}/v0/store/user", auth_h),
             return_exceptions=True,
         )
     result: dict = {}
@@ -304,7 +304,7 @@ async def collect_stremthru() -> dict:
     # Magnet cache stats from SQLite
     try:
         proc = await asyncio.create_subprocess_exec(
-            "sqlite3", "/home/stremthru/stremthru/data/stremthru.db",
+            "sqlite3", cfg.STREMTHRU_DB,
             "SELECT store, is_cached, COUNT(*) FROM magnet_cache GROUP BY store, is_cached;",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
@@ -324,7 +324,7 @@ async def collect_stremthru() -> dict:
     # Torrent info count
     try:
         proc = await asyncio.create_subprocess_exec(
-            "sqlite3", "/home/stremthru/stremthru/data/stremthru.db",
+            "sqlite3", cfg.STREMTHRU_DB,
             "SELECT COUNT(*) FROM torrent_info;",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
@@ -338,7 +338,7 @@ async def collect_stremthru() -> dict:
     # DMM hashlist count
     try:
         proc = await asyncio.create_subprocess_exec(
-            "sqlite3", "/home/stremthru/stremthru/data/stremthru.db",
+            "sqlite3", cfg.STREMTHRU_DB,
             "SELECT COUNT(*) FROM dmm_hashlist;",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
@@ -351,7 +351,7 @@ async def collect_stremthru() -> dict:
 
     # DB file size
     try:
-        p = Path("/home/stremthru/stremthru/data/stremthru.db")
+        p = Path(cfg.STREMTHRU_DB)
         if p.exists():
             size_mb = p.stat().st_size / (1024 * 1024)
             result["db_size"] = f"{size_mb:.0f} MB" if size_mb < 1024 else f"{size_mb/1024:.1f} GB"
@@ -365,8 +365,8 @@ async def collect_zilean() -> dict:
     h = {"X-Api-Key": cfg.ZILEAN_KEY} if cfg.ZILEAN_KEY else {}
     async with httpx.AsyncClient(timeout=10) as c:
         ping, sample = await asyncio.gather(
-            _get_raw(c, "http://127.0.0.1:8181/healthchecks/ping", h),
-            _get(c, "http://127.0.0.1:8181/dmm/filtered?query=batman&limit=10", h),
+            _get_raw(c, f"{cfg.ZILEAN_URL}/healthchecks/ping", h),
+            _get(c, f"{cfg.ZILEAN_URL}/dmm/filtered?query=batman&limit=10", h),
             return_exceptions=True,
         )
     result: dict = {}
@@ -478,9 +478,9 @@ async def collect_zilean() -> dict:
 async def collect_aiostreams() -> dict:
     async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
         manifest, status, health = await asyncio.gather(
-            _get(c, "http://127.0.0.1:7070/stremio/manifest.json"),
-            _get(c, "http://127.0.0.1:7070/api/v1/status"),
-            _get(c, "http://127.0.0.1:7070/api/v1/health"),
+            _get(c, f"{cfg.AIOSTREAMS_URL}/stremio/manifest.json"),
+            _get(c, f"{cfg.AIOSTREAMS_URL}/api/v1/status"),
+            _get(c, f"{cfg.AIOSTREAMS_URL}/api/v1/health"),
             return_exceptions=True,
         )
     result: dict = {}
@@ -494,7 +494,7 @@ async def collect_aiostreams() -> dict:
     else:
         try:
             async with httpx.AsyncClient(timeout=5) as c2:
-                r = await c2.get("http://127.0.0.1:7070/")
+                r = await c2.get(f"{cfg.AIOSTREAMS_URL}/")
                 result["responding"] = r.status_code < 500
         except Exception:
             pass
@@ -521,7 +521,7 @@ async def collect_aiostreams() -> dict:
     # User count from SQLite
     try:
         proc = await asyncio.create_subprocess_exec(
-            "sqlite3", "/home/s/AIOStreams/data/db.sqlite",
+            "sqlite3", cfg.AIOSTREAMS_DB,
             "SELECT COUNT(*) FROM USERS;",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
@@ -535,7 +535,7 @@ async def collect_aiostreams() -> dict:
     # DB cache size
     try:
         proc = await asyncio.create_subprocess_exec(
-            "sqlite3", "/home/s/AIOStreams/data/db.sqlite",
+            "sqlite3", cfg.AIOSTREAMS_DB,
             "SELECT COUNT(*) FROM cache;",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
@@ -551,7 +551,7 @@ async def collect_aiostreams() -> dict:
 
 async def collect_flaresolverr() -> dict:
     async with httpx.AsyncClient(timeout=8) as c:
-        h = await _get(c, "http://127.0.0.1:8191/health")
+        h = await _get(c, f"{cfg.FLARESOLVERR_URL}/health")
     if isinstance(h, dict):
         return {"status": h.get("status", ""), "version": h.get("version", "")}
     return {}
@@ -559,7 +559,7 @@ async def collect_flaresolverr() -> dict:
 
 async def collect_jackett() -> dict:
     result: dict = {}
-    indexer_dir = Path("/var/lib/jackett/Indexers")
+    indexer_dir = Path(cfg.JACKETT_INDEXER_DIR)
     if indexer_dir.exists():
         result["indexers_configured"] = len(list(indexer_dir.glob("*.json")))
     try:
@@ -575,7 +575,7 @@ async def collect_jackett() -> dict:
     except Exception:
         pass
     async with httpx.AsyncClient(timeout=10) as c:
-        r = await _get(c, f"http://127.0.0.1:9117/api/v2.0/indexers/all/results"
+        r = await _get(c, f"{cfg.JACKETT_URL}/api/v2.0/indexers/all/results"
                           f"?apikey={cfg.JACKETT_KEY}&Query=test&Limit=1")
     if isinstance(r, dict):
         result["responding"] = True
@@ -583,7 +583,7 @@ async def collect_jackett() -> dict:
 
 
 async def collect_prowlarr() -> dict:
-    base = "http://127.0.0.1:9696"
+    base = cfg.PROWLARR_URL
     h = {"X-Api-Key": cfg.PROWLARR_KEY}
     async with httpx.AsyncClient(timeout=10) as c:
         status, indexers, health, istats = await asyncio.gather(
@@ -640,7 +640,7 @@ async def _arr(base: str, key: str, *, path: str = "v3") -> dict:
 
 
 async def collect_radarr() -> dict:
-    result, movies = await _arr("http://127.0.0.1:7878", cfg.RADARR_KEY)
+    result, movies = await _arr(cfg.RADARR_URL, cfg.RADARR_KEY)
     if isinstance(movies, list):
         result["total"]      = len(movies)
         result["downloaded"] = sum(1 for m in movies if m.get("hasFile"))
@@ -649,7 +649,7 @@ async def collect_radarr() -> dict:
 
 
 async def collect_sonarr() -> dict:
-    base = "http://127.0.0.1:8989"
+    base = cfg.SONARR_URL
     h = {"X-Api-Key": cfg.SONARR_KEY}
     async with httpx.AsyncClient(timeout=20) as c:
         status, series, queue, health, disk, wanted = await asyncio.gather(
@@ -685,7 +685,7 @@ async def collect_sonarr() -> dict:
 
 
 async def collect_lidarr() -> dict:
-    base = "http://127.0.0.1:8686"
+    base = cfg.LIDARR_URL
     h = {"X-Api-Key": cfg.LIDARR_KEY}
     async with httpx.AsyncClient(timeout=20) as c:
         status, artists, queue, health, disk = await asyncio.gather(
@@ -718,7 +718,7 @@ async def collect_lidarr() -> dict:
 
 
 async def collect_bazarr() -> dict:
-    base = "http://127.0.0.1:6767"
+    base = cfg.BAZARR_URL
     h = {"X-Api-Key": cfg.BAZARR_KEY}
     async with httpx.AsyncClient(timeout=10) as c:
         status, movies, episodes = await asyncio.gather(
@@ -742,7 +742,7 @@ async def collect_bazarr() -> dict:
 
 
 async def collect_jellyfin() -> dict:
-    base = "http://127.0.0.1:8096"
+    base = cfg.JELLYFIN_URL
     h = {"X-Emby-Token": cfg.JELLYFIN_KEY} if cfg.JELLYFIN_KEY else {}
     async with httpx.AsyncClient(timeout=10) as c:
         pub_info, info, sessions, counts = await asyncio.gather(
@@ -778,7 +778,7 @@ async def collect_jellyfin() -> dict:
 
 
 async def collect_plex() -> dict:
-    base = "http://127.0.0.1:32400"
+    base = cfg.PLEX_URL
     h: dict[str, str] = {}
     if cfg.PLEX_TOKEN:
         h["X-Plex-Token"] = cfg.PLEX_TOKEN
@@ -811,7 +811,7 @@ async def collect_plex() -> dict:
 
 
 async def collect_jellyseerr() -> dict:
-    base = "http://127.0.0.1:5055"
+    base = cfg.JELLYSEERR_URL
     h = {"X-Api-Key": cfg.JELLYSEERR_KEY} if cfg.JELLYSEERR_KEY else {}
     async with httpx.AsyncClient(timeout=10) as c:
         status, req_count = await asyncio.gather(
@@ -837,7 +837,7 @@ async def collect_jellyseerr() -> dict:
 async def collect_dispatcharr() -> dict:
     tok = await _get_dispatcharr_token()
     h: dict[str, str] = {"Authorization": f"Bearer {tok}"} if tok else {}
-    base = "http://127.0.0.1:9191"
+    base = cfg.DISPATCHARR_API_URL
     async with httpx.AsyncClient(timeout=15) as c:
         ver, streams_pg, channels, epg_src, m3u_accs = await asyncio.gather(
             _get(c, f"{base}/api/core/version/", h),
@@ -878,7 +878,7 @@ async def _get_qbt_sid() -> str:
     try:
         async with httpx.AsyncClient(timeout=8) as c:
             r = await c.post(
-                "http://127.0.0.1:10000/api/v2/auth/login",
+                f"{cfg.QBITTORRENT_URL}/api/v2/auth/login",
                 content=f"username={cfg.QBT_USER}&password={cfg.QBT_PASS}",
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
@@ -900,8 +900,8 @@ async def _get_qbt_sid() -> str:
 async def collect_byparr() -> dict:
     async with httpx.AsyncClient(timeout=8) as c:
         health, root = await asyncio.gather(
-            _get(c, "http://127.0.0.1:8192/health"),
-            _get(c, "http://127.0.0.1:8192/"),
+            _get(c, f"{cfg.BYPARR_URL}/health"),
+            _get(c, f"{cfg.BYPARR_URL}/"),
             return_exceptions=True,
         )
     result: dict = {}
@@ -921,12 +921,12 @@ async def collect_byparr() -> dict:
 
 async def collect_mediaflow() -> dict:
     async with httpx.AsyncClient(timeout=8) as c:
-        h = await _get(c, "http://127.0.0.1:8888/health")
+        h = await _get(c, f"{cfg.MEDIAFLOW_URL}/health")
     return {"status": h.get("status", "")} if isinstance(h, dict) else {}
 
 
 async def collect_qbittorrent() -> dict:
-    base = "http://127.0.0.1:10000"
+    base = cfg.QBITTORRENT_URL
     sid = await _get_qbt_sid()
     cookie_h = {"Cookie": f"SID={sid}"} if sid else {}
     result: dict = {}

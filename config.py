@@ -69,7 +69,7 @@ PLEX_TOKEN      = _k("PLEX_TOKEN",          "plex_token",       "")
 GITHUB_TOKEN    = os.environ.get("GITHUB_TOKEN", "")
 QBT_USER        = _k("QBT_USER",           "qbt_user",         "admin")
 QBT_PASS        = _k("QBT_PASS",           "qbt_pass",         "")
-STREMTHRU_USER  = "admin"
+STREMTHRU_USER  = _k("STREMTHRU_USER",     "stremthru_user",   "admin")
 STREMTHRU_PASS  = _k("STREMTHRU_PASS",      "stremthru_pass",   "")
 COMET_ADMIN_PASS = _k("COMET_ADMIN_PASS",   "comet_admin_password", "")
 MEDIAFUSION_PASS      = _k("MEDIAFUSION_PASS",      "mediafusion_api_password", "")
@@ -98,9 +98,10 @@ KEY_REGISTRY: dict[str, dict] = {
 }
 
 # Try to read Plex token from Preferences.xml
+PLEX_PREFS_PATH = os.environ.get("PLEX_PREFS_PATH", "/var/lib/plex/Plex Media Server/Preferences.xml")
 if not PLEX_TOKEN:
-    _plex_prefs = Path("/var/lib/plex/Plex Media Server/Preferences.xml")
     try:
+        _plex_prefs = Path(PLEX_PREFS_PATH)
         if _plex_prefs.exists():
             m = re.search(r'PlexOnlineToken="([^"]+)"', _plex_prefs.read_text())
             if m:
@@ -108,61 +109,128 @@ if not PLEX_TOKEN:
     except Exception:
         pass
 
+# ── Service Base URLs ────────────────────────────────────────────────────────
+# Override any of these via environment variables.
+COMET_URL        = os.environ.get("COMET_URL",        "http://127.0.0.1:8070")
+MEDIAFUSION_URL  = os.environ.get("MEDIAFUSION_URL",  "https://127.0.0.1:8090")
+STREMTHRU_URL    = os.environ.get("STREMTHRU_URL",    "http://127.0.0.1:8080")
+ZILEAN_URL       = os.environ.get("ZILEAN_URL",       "http://127.0.0.1:8181")
+AIOSTREAMS_URL   = os.environ.get("AIOSTREAMS_URL",   "http://127.0.0.1:7070")
+JACKETT_URL      = os.environ.get("JACKETT_URL",      "http://127.0.0.1:9117")
+PROWLARR_URL     = os.environ.get("PROWLARR_URL",     "http://127.0.0.1:9696")
+FLARESOLVERR_URL = os.environ.get("FLARESOLVERR_URL", "http://127.0.0.1:8191")
+BYPARR_URL       = os.environ.get("BYPARR_URL",       "http://127.0.0.1:8192")
+RADARR_URL       = os.environ.get("RADARR_URL",       "http://127.0.0.1:7878")
+SONARR_URL       = os.environ.get("SONARR_URL",       "http://127.0.0.1:8989")
+LIDARR_URL       = os.environ.get("LIDARR_URL",       "http://127.0.0.1:8686")
+BAZARR_URL       = os.environ.get("BAZARR_URL",       "http://127.0.0.1:6767")
+JELLYFIN_URL     = os.environ.get("JELLYFIN_URL",     "http://127.0.0.1:8096")
+PLEX_URL         = os.environ.get("PLEX_URL",         "http://127.0.0.1:32400")
+JELLYSEERR_URL   = os.environ.get("JELLYSEERR_URL",   "http://127.0.0.1:5055")
+DISPATCHARR_URL  = os.environ.get("DISPATCHARR_URL",  "http://127.0.0.1:8001")
+DISPATCHARR_API_URL = os.environ.get("DISPATCHARR_API_URL", "http://127.0.0.1:9191")
+MEDIAFLOW_URL    = os.environ.get("MEDIAFLOW_URL",    "http://127.0.0.1:8060")
+QBITTORRENT_URL  = os.environ.get("QBITTORRENT_URL",  "http://127.0.0.1:10000")
+
+# ── Data / File Paths ────────────────────────────────────────────────────────
+COMET_CHANGELOG    = os.environ.get("COMET_CHANGELOG",    "/home/comet/comet/CHANGELOG.md")
+STREMTHRU_DB       = os.environ.get("STREMTHRU_DB",       "/home/stremthru/stremthru/data/stremthru.db")
+AIOSTREAMS_DB      = os.environ.get("AIOSTREAMS_DB",      "/home/s/AIOStreams/data/db.sqlite")
+JACKETT_INDEXER_DIR = os.environ.get("JACKETT_INDEXER_DIR", "/var/lib/jackett/Indexers")
+PLEX_LOG_DIR       = os.environ.get("PLEX_LOG_DIR",       "/var/lib/plex/Plex Media Server/Logs")
+
+# ── Speed Test ───────────────────────────────────────────────────────────────
+SPEEDTEST_DIRECT_URL  = os.environ.get("SPEEDTEST_DIRECT_URL",  "")
+SPEEDTEST_DIRECT_NAME = os.environ.get("SPEEDTEST_DIRECT_NAME", "Direct")
+SPEEDTEST_CF_URL      = os.environ.get("SPEEDTEST_CF_URL",      "")
+SPEEDTEST_CF_NAME     = os.environ.get("SPEEDTEST_CF_NAME",     "Cloudflare")
+
+# ── Benchmark Endpoint Configs ───────────────────────────────────────────────
+# Base64-encoded Stremio addon config tokens for the benchmark feature.
+BENCH_COMET_CONFIG       = os.environ.get("BENCH_COMET_CONFIG",       "")
+BENCH_MEDIAFUSION_CONFIG = os.environ.get("BENCH_MEDIAFUSION_CONFIG", "")
+BENCH_STREMTHRU_CONFIG   = os.environ.get("BENCH_STREMTHRU_CONFIG",   "")
+BENCH_AIOSTREAMS_CONFIG  = os.environ.get("BENCH_AIOSTREAMS_CONFIG",  "")
+BENCH_TORRENTIO_RD_KEY   = os.environ.get("BENCH_TORRENTIO_RD_KEY",   "")
+
 # ── Service Definitions ───────────────────────────────────────────────────────
 SERVICES: dict[str, dict] = {
     "comet":       {"name": "Comet",          "unit": "comet",
-                    "url":  "http://127.0.0.1:8070/manifest.json",   "ok": [200], "category": "streaming"},
+                    "url":  f"{COMET_URL}/manifest.json",              "ok": [200], "category": "streaming"},
     "mediafusion": {"name": "MediaFusion",    "unit": "mediafusion",
-                    "url":  "https://127.0.0.1:8090/health",          "ok": [200,307], "ssl": False, "category": "streaming"},
+                    "url":  f"{MEDIAFUSION_URL}/health",               "ok": [200,307], "ssl": False, "category": "streaming"},
     "stremthru":   {"name": "StremThru",      "unit": "stremthru",
-                    "url":  "http://127.0.0.1:8080/v0/health",        "ok": [200], "category": "streaming"},
+                    "url":  f"{STREMTHRU_URL}/v0/health",              "ok": [200], "category": "streaming"},
     "zilean":      {"name": "Zilean",         "unit": "zilean",
-                    "url":  "http://127.0.0.1:8181/healthchecks/ping", "ok": [200], "category": "streaming"},
+                    "url":  f"{ZILEAN_URL}/healthchecks/ping",         "ok": [200], "category": "streaming"},
     "aiostreams":  {"name": "AIOStreams",      "unit": "aiostreams",
-                    "url":  "http://127.0.0.1:7070/stremio/manifest.json", "ok": [200,301,302],
+                    "url":  f"{AIOSTREAMS_URL}/stremio/manifest.json", "ok": [200,301,302],
                     "follow_redirects": True, "category": "streaming"},
     "jackett":     {"name": "Jackett",        "unit": "jackett",
-                    "url":  f"http://127.0.0.1:9117/api/v2.0/indexers/all/results?apikey={JACKETT_KEY}&Query=health&Limit=1",
+                    "url":  f"{JACKETT_URL}/api/v2.0/indexers/all/results?apikey={JACKETT_KEY}&Query=health&Limit=1",
                     "ok": [200], "category": "indexers"},
     "prowlarr":    {"name": "Prowlarr",       "unit": "prowlarr",
-                    "url":  "http://127.0.0.1:9696/api/v1/system/status",
+                    "url":  f"{PROWLARR_URL}/api/v1/system/status",
                     "ok": [200], "headers": {"X-Api-Key": PROWLARR_KEY}, "category": "indexers"},
     "flaresolverr":{"name": "FlareSolverr",   "unit": "flaresolverr",
-                    "url":  "http://127.0.0.1:8191/health",            "ok": [200], "category": "indexers"},
+                    "url":  f"{FLARESOLVERR_URL}/health",              "ok": [200], "category": "indexers"},
     "byparr":      {"name": "Byparr",         "unit": "byparr",
-                    "url":  "http://127.0.0.1:8192/",                  "ok": [200, 301, 302],
+                    "url":  f"{BYPARR_URL}/",                          "ok": [200, 301, 302],
                     "follow_redirects": False, "category": "indexers"},
     "radarr":      {"name": "Radarr",         "unit": "radarr",
-                    "url":  "http://127.0.0.1:7878/api/v3/system/status",
+                    "url":  f"{RADARR_URL}/api/v3/system/status",
                     "ok": [200], "headers": {"X-Api-Key": RADARR_KEY}, "category": "arr"},
     "sonarr":      {"name": "Sonarr",         "unit": "sonarr",
-                    "url":  "http://127.0.0.1:8989/api/v3/system/status",
+                    "url":  f"{SONARR_URL}/api/v3/system/status",
                     "ok": [200], "headers": {"X-Api-Key": SONARR_KEY}, "category": "arr"},
     "lidarr":      {"name": "Lidarr",         "unit": "lidarr",
-                    "url":  "http://127.0.0.1:8686/api/v1/system/status",
+                    "url":  f"{LIDARR_URL}/api/v1/system/status",
                     "ok": [200], "headers": {"X-Api-Key": LIDARR_KEY}, "category": "arr"},
     "bazarr":      {"name": "Bazarr",         "unit": "bazarr",
-                    "url":  "http://127.0.0.1:6767/api/system/status",
+                    "url":  f"{BAZARR_URL}/api/system/status",
                     "ok": [200], "headers": {"X-Api-Key": BAZARR_KEY}, "category": "arr"},
     "jellyfin":    {"name": "Jellyfin",       "unit": "jellyfin",
-                    "url":  "http://127.0.0.1:8096/System/Info/Public", "ok": [200], "category": "media"},
+                    "url":  f"{JELLYFIN_URL}/System/Info/Public",      "ok": [200], "category": "media"},
     "plex":        {"name": "Plex",           "unit": "plexmediaserver",
-                    "url":  "http://127.0.0.1:32400/identity",          "ok": [200], "category": "media"},
+                    "url":  f"{PLEX_URL}/identity",                    "ok": [200], "category": "media"},
     "jellyseerr":  {"name": "Jellyseerr",     "unit": "jellyseerr",
-                    "url":  "http://127.0.0.1:5055/api/v1/status",
+                    "url":  f"{JELLYSEERR_URL}/api/v1/status",
                     "ok": [200], "headers": {"X-Api-Key": JELLYSEERR_KEY},
                     "follow_redirects": True, "category": "media"},
     "dispatcharr": {"name": "Dispatcharr",    "unit": "dispatcharr",
-                    "url":  "http://127.0.0.1:8001/",                   "ok": [200], "category": "dispatch"},
+                    "url":  f"{DISPATCHARR_URL}/",                     "ok": [200], "category": "dispatch"},
     "mediaflow":   {"name": "MediaFlow Proxy","unit": "mediaflow-proxy",
-                    "url":  "http://127.0.0.1:8060/health",             "ok": [200], "category": "dispatch"},
+                    "url":  f"{MEDIAFLOW_URL}/health",                 "ok": [200], "category": "dispatch"},
     "qbittorrent": {"name": "qBittorrent",    "unit": "qbittorrent-nox",
-                    "url":  "http://127.0.0.1:10000/",                  "ok": [200],
+                    "url":  f"{QBITTORRENT_URL}/",                     "ok": [200],
                     "follow_redirects": True, "category": "downloads"},
     "pgbouncer":   {"name": "PgBouncer",      "unit": "pgbouncer",      "url": None, "category": "infra"},
     "postgresql":  {"name": "PostgreSQL",     "unit": "postgresql",     "url": None, "category": "infra"},
     "redis":       {"name": "Redis / Valkey", "unit": "valkey",         "url": None, "category": "infra"},
     "system":      {"name": "System",         "unit": None,             "url": None, "category": "system"},
+}
+
+# Web panel URLs for the frontend (may differ from API base URLs)
+WEB_URLS: dict[str, str] = {
+    "comet":        COMET_URL,
+    "mediafusion":  MEDIAFUSION_URL,
+    "stremthru":    STREMTHRU_URL,
+    "zilean":       ZILEAN_URL,
+    "aiostreams":   AIOSTREAMS_URL,
+    "jackett":      JACKETT_URL,
+    "prowlarr":     PROWLARR_URL,
+    "flaresolverr": FLARESOLVERR_URL,
+    "byparr":       BYPARR_URL,
+    "radarr":       RADARR_URL,
+    "sonarr":       SONARR_URL,
+    "lidarr":       LIDARR_URL,
+    "bazarr":       BAZARR_URL,
+    "jellyfin":     JELLYFIN_URL,
+    "plex":         f"{PLEX_URL}/web",
+    "jellyseerr":   JELLYSEERR_URL,
+    "dispatcharr":  DISPATCHARR_URL,
+    "mediaflow":    MEDIAFLOW_URL,
+    "qbittorrent":  QBITTORRENT_URL,
 }
 
 CATEGORIES: dict[str, str] = {

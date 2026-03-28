@@ -481,28 +481,8 @@ const CATS = {
 let statusData={}, statsData={}, versionsData={};
 let logTimer=null, logsReady=false, curLogUnit='';
 
-// ── Web panel URLs for each service ──
-const WEB_URLS = {
-  comet:        'http://127.0.0.1:8070',
-  mediafusion:  'https://127.0.0.1:8090',
-  stremthru:    'http://127.0.0.1:8080',
-  zilean:       'http://127.0.0.1:8181',
-  aiostreams:   'http://127.0.0.1:7070',
-  jackett:      'http://127.0.0.1:9117',
-  prowlarr:     'http://127.0.0.1:9696',
-  flaresolverr: 'http://127.0.0.1:8191',
-  byparr:       'http://127.0.0.1:8192',
-  radarr:       'http://127.0.0.1:7878',
-  sonarr:       'http://127.0.0.1:8989',
-  lidarr:       'http://127.0.0.1:8686',
-  bazarr:       'http://127.0.0.1:6767',
-  jellyfin:     'http://127.0.0.1:8096',
-  plex:         'http://127.0.0.1:32400/web',
-  jellyseerr:   'http://127.0.0.1:5055',
-  dispatcharr:  'http://127.0.0.1:8001',
-  mediaflow:    'http://127.0.0.1:8888',
-  qbittorrent:  'http://127.0.0.1:10000',
-};
+// ── Web panel URLs for each service (injected from config) ──
+const WEB_URLS = {{WEB_URLS_JSON}};
 
 // ── Tabs ──
 function tab(n,el){
@@ -1528,6 +1508,18 @@ DASH = DASH.replace("__UNITS__", _UNIT_OPTS)
 import json as _json
 DASH = DASH.replace("__BENCH_TITLES__", _json.dumps(BENCH_TITLES))
 
+# Inject web panel URLs from config
+DASH = DASH.replace("{{WEB_URLS_JSON}}", _json.dumps(cfg.WEB_URLS))
+
+# Inject speedtest config into login page and dashboard
+for _tpl_var, _tpl_val in [
+    ("{{SPEEDTEST_DIRECT_URL}}", cfg.SPEEDTEST_DIRECT_URL),
+    ("{{SPEEDTEST_DIRECT_NAME}}", cfg.SPEEDTEST_DIRECT_NAME),
+    ("{{SPEEDTEST_CF_URL}}", cfg.SPEEDTEST_CF_URL),
+    ("{{SPEEDTEST_CF_NAME}}", cfg.SPEEDTEST_CF_NAME),
+]:
+    DASH = DASH.replace(_tpl_var, _tpl_val)
+
 LOGIN = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>StreamMonitor</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1607,8 +1599,8 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
   <div class="divider"></div>
   <div class="speed-section">
     <h3>Speed Test</h3>
-    <div class="stest"><span class="name">Direct<small>obby.ca</small></span><div class="sbar"><div class="fill" id="bf-d"></div></div><span class="sval" id="sv-d">&mdash;</span></div>
-    <div class="stest"><span class="name">Cloudflare<small>obnoxious.lol</small></span><div class="sbar"><div class="fill" id="bf-c"></div></div><span class="sval" id="sv-c">&mdash;</span></div>
+    <div class="stest"><span class="name">{{SPEEDTEST_DIRECT_NAME}}</span><div class="sbar"><div class="fill" id="bf-d"></div></div><span class="sval" id="sv-d">&mdash;</span></div>
+    <div class="stest"><span class="name">{{SPEEDTEST_CF_NAME}}</span><div class="sbar"><div class="fill" id="bf-c"></div></div><span class="sval" id="sv-c">&mdash;</span></div>
     <div class="speed-controls">
       <select id="smb"><option value="10">10 MB</option><option value="25" selected>25 MB</option><option value="50">50 MB</option><option value="100">100 MB</option></select>
       <button class="sbtn" id="sbtn" onclick="runST()">Run Tests</button>
@@ -1633,7 +1625,7 @@ async function runST(){
   const btn=document.getElementById('sbtn');btn.disabled=true;btn.textContent='Testing...';
   const mb=parseInt(document.getElementById('smb').value)||25;
   const st=document.getElementById('sst');
-  const eps=[{id:'d',u:'https://speedtest.obby.ca/speedtest/download',n:'Direct'},{id:'c',u:'https://speedtest.obnoxious.lol/speedtest/download',n:'Cloudflare'}];
+  const eps=[{id:'d',u:'{{SPEEDTEST_DIRECT_URL}}',n:'{{SPEEDTEST_DIRECT_NAME}}'},{id:'c',u:'{{SPEEDTEST_CF_URL}}',n:'{{SPEEDTEST_CF_NAME}}'}];
   const res=[];
   for(const ep of eps){
     st.textContent='Testing '+ep.n+'...';
@@ -1693,7 +1685,13 @@ async def login(request: Request):
             err = "Invalid credentials"
         except Exception:
             err = "Login error — try again"
-    return HTMLResponse(LOGIN.replace("{ERR}", f'<p class="err">{err}</p>' if err else ""))
+    _login_html = LOGIN.replace("{ERR}", f'<p class="err">{err}</p>' if err else "")
+    for _tv, _vv in [("{{SPEEDTEST_DIRECT_URL}}", cfg.SPEEDTEST_DIRECT_URL),
+                      ("{{SPEEDTEST_DIRECT_NAME}}", cfg.SPEEDTEST_DIRECT_NAME),
+                      ("{{SPEEDTEST_CF_URL}}", cfg.SPEEDTEST_CF_URL),
+                      ("{{SPEEDTEST_CF_NAME}}", cfg.SPEEDTEST_CF_NAME)]:
+        _login_html = _login_html.replace(_tv, _vv)
+    return HTMLResponse(_login_html)
 
 
 async def logout(request: Request):
