@@ -1613,6 +1613,13 @@ function openServiceModal(serviceId, tabName = 'overview') {
       ].join('')
     : ''
 
+  // Show/hide AIOStreams-specific tabs
+  const isAio = serviceId === 'aiostreams'
+  const azTab = document.getElementById('mtab-analyzer')
+  const tsTab = document.getElementById('mtab-testsuite')
+  if (azTab) azTab.style.display = isAio ? '' : 'none'
+  if (tsTab) tsTab.style.display = isAio ? '' : 'none'
+
   // Show modal, open correct tab
   document.getElementById('svc-modal').classList.add('open')
   document.body.style.overflow = 'hidden'
@@ -2010,6 +2017,165 @@ async function tryApiEndpoint(path, method = 'GET') {
   } catch (err) {
     responseElement.textContent = 'Error: ' + err.message
   }
+}
+
+// ── AIOStreams Analyzer ──
+let analyzerData = null
+
+async function loadAnalyzer() {
+  const body = document.getElementById('analyzer-body')
+  const status = document.getElementById('analyzer-status')
+  const n = document.getElementById('analyzer-lines')?.value || '5000'
+  body.innerHTML = '<div style="text-align:center;padding:1rem"><span class="spin"></span> Analyzing logs...</div>'
+  status.textContent = ''
+  const d = await safeJson(`/api/aiostreams/analyze?n=${n}`)
+  if (!d) { body.innerHTML = '<div style="color:var(--err);padding:.5rem">Failed to load analysis data.</div>'; return }
+  analyzerData = d
+  status.textContent = `${d.log_lines} lines \u00b7 Updated: ${new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })}`
+  renderAnalyzer(d)
+}
+
+function azStat(val, label) {
+  return `<div class="az-stat"><div class="az-val">${val}</div><div class="az-lbl">${label}</div></div>`
+}
+
+function renderAnalyzer(d) {
+  const body = document.getElementById('analyzer-body')
+  const s = d.summary || {}
+  let h = ''
+  h += '<div class="az-summary">'
+  h += azStat(s.total_requests || 0, 'REQUESTS')
+  h += azStat(s.avg_response_time_s != null ? s.avg_response_time_s.toFixed(2) + 's' : '\u2014', 'AVG RESPONSE')
+  h += azStat(s.avg_streams != null ? Number(s.avg_streams).toFixed(1) : '\u2014', 'AVG STREAMS')
+  h += azStat(s.fastest_s != null ? s.fastest_s.toFixed(2) + 's' : '\u2014', 'FASTEST')
+  h += azStat(s.slowest_s != null ? s.slowest_s.toFixed(2) + 's' : '\u2014', 'SLOWEST')
+  h += azStat(s.total_addon_errors || 0, 'ADDON ERRORS')
+  h += '</div>'
+  const addons = d.addons || {}
+  const addonList = Object.entries(addons).sort((a, b) => b[1].total_streams - a[1].total_streams)
+  if (addonList.length) {
+    h += '<div class="az-section">ADDON PERFORMANCE</div>'
+    h += '<table class="az-table"><thead><tr><th>ADDON</th><th>CALLS</th><th>SUCCESS</th><th style="width:120px">RATE</th><th>AVG</th><th>MIN</th><th>MAX</th><th>AVG STREAMS</th><th>TOTAL STREAMS</th></tr></thead><tbody>'
+    for (const [name, a] of addonList) {
+      const rate = a.calls > 0 ? a.successes / a.calls : 0
+      const rateColor = rate >= 0.9 ? 'green' : rate >= 0.5 ? 'yellow' : 'red'
+      const ratePct = (rate * 100).toFixed(0) + '%'
+      const maxColor = a.max_time_s > 5 ? 'var(--err)' : a.max_time_s > 2 ? 'var(--warn)' : 'var(--ok)'
+      h += `<tr><td style="color:#e2e8f0;font-weight:600;white-space:nowrap">${esc(name)}</td><td>${a.calls}</td><td style="color:var(--ok)">${a.successes}/${a.calls}</td><td><div style="display:flex;align-items:center;gap:.3rem"><div class="az-bar-wrap" style="width:60px"><div class="az-bar ${rateColor}" style="width:${rate * 100}%"></div></div><span style="font-size:.65rem;color:${rate >= 0.9 ? 'var(--ok)' : rate >= 0.5 ? 'var(--warn)' : 'var(--err)'}">${ratePct}</span></div></td><td>${a.avg_time_s != null ? a.avg_time_s.toFixed(2) + 's' : '\u2014'}</td><td style="color:var(--ok)">${a.min_time_s != null ? a.min_time_s.toFixed(2) + 's' : '\u2014'}</td><td style="color:${maxColor}">${a.max_time_s != null ? a.max_time_s.toFixed(2) + 's' : '\u2014'}</td><td>${a.avg_streams != null ? a.avg_streams.toFixed(1) : '\u2014'}</td><td style="color:var(--accent2);font-weight:700">${a.total_streams || 0}</td></tr>`
+    }
+    h += '</tbody></table>'
+    h += '<div class="az-section">RESPONSE TIME BY ADDON (AVG)</div>'
+    const maxTime = Math.max(...addonList.map(([, a]) => a.avg_time_s || 0), 0.1)
+    for (const [name, a] of addonList) {
+      const pct = ((a.avg_time_s || 0) / maxTime) * 100
+      const color = (a.avg_time_s || 0) > 3 ? 'red' : (a.avg_time_s || 0) > 1.5 ? 'yellow' : 'green'
+      const fails = a.calls - a.successes
+      h += `<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem;font-size:.72rem"><span style="min-width:180px;text-align:right;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</span><div class="az-bar-wrap" style="flex:1"><div class="az-bar ${color}" style="width:${pct}%"></div></div><span style="min-width:50px;font-weight:700;color:${color === 'red' ? 'var(--err)' : color === 'yellow' ? 'var(--warn)' : 'var(--ok)'}">${a.avg_time_s ? a.avg_time_s.toFixed(2) + 's' : '\u2014'}</span>${fails > 0 ? `<span style="font-size:.62rem;color:var(--err)">${fails} fail</span>` : ''}</div>`
+    }
+  }
+  const errors = d.errors || {}
+  const errList = Object.entries(errors).sort((a, b) => b[1] - a[1])
+  if (errList.length) {
+    h += '<div class="az-section">ERROR BREAKDOWN</div>'
+    for (const [msg, count] of errList) {
+      h += `<div style="display:flex;gap:.5rem;align-items:baseline;font-size:.72rem;padding:.2rem 0;border-bottom:1px solid #13172a"><span style="color:var(--err);font-weight:700;min-width:30px">${count}\u00d7</span><span style="color:#94a3b8">${esc(msg)}</span></div>`
+    }
+  }
+  const reqs = d.recent_requests || []
+  if (reqs.length) {
+    h += '<div class="az-section">RECENT STREAM REQUESTS <span style="font-weight:400;text-transform:none;color:var(--muted);font-size:.58rem">(click row to expand)</span></div>'
+    h += '<table class="az-table"><thead><tr><th>CONTENT ID</th><th>TYPE</th><th>STREAMS</th><th>TIME</th><th>ERRORS</th><th>ADDONS</th></tr></thead><tbody>'
+    for (const r of reqs) {
+      const addonsStr = (r.addons || []).map(a => `<span style="color:${a.status === 'success' ? 'var(--ok)' : 'var(--err)'};font-size:.6rem">${esc(a.name)}</span>`).join(' \u00b7 ')
+      const timeColor = (r.duration_s || 0) > 5 ? 'var(--err)' : (r.duration_s || 0) > 2 ? 'var(--warn)' : 'var(--ok)'
+      h += `<tr class="az-req" onclick="this.classList.toggle('expanded')"><td style="font-family:monospace;color:var(--accent2)">${esc(r.content_id || '\u2014')}</td><td>${esc(r.type || '\u2014')}</td><td style="color:var(--accent2);font-weight:700">${r.total_streams ?? '\u2014'}</td><td style="color:${timeColor}">${r.duration_s ? r.duration_s.toFixed(2) + 's' : '\u2014'}</td><td style="color:${r.total_errors > 0 ? 'var(--err)' : 'var(--muted)'}">${r.total_errors || 0}</td><td>${addonsStr}</td></tr>`
+      if (r.addons?.length) {
+        h += '<tr class="az-req-detail"><td colspan="6"><div style="display:flex;flex-wrap:wrap;gap:.4rem">'
+        for (const a of r.addons) {
+          const ok = a.status === 'success'
+          h += `<div style="padding:.25rem .5rem;background:${ok ? 'var(--ok-bg)' : 'var(--err-bg)'};border:1px solid ${ok ? '#065f46' : '#7f1d1d'};border-radius:6px;font-size:.65rem"><strong style="color:${ok ? 'var(--ok)' : 'var(--err)'}">${esc(a.name)}</strong><span style="color:var(--muted);margin-left:.3rem">${a.streams ?? 0} streams</span><span style="color:var(--muted);margin-left:.2rem">${a.time_s ? a.time_s.toFixed(2) + 's' : ''}</span>${a.error ? `<div style="color:var(--err);font-size:.6rem;margin-top:.1rem">${esc(a.error)}</div>` : ''}</div>`
+        }
+        h += '</div></td></tr>'
+      }
+    }
+    h += '</tbody></table>'
+  }
+  if (!addonList.length && !reqs.length) {
+    h += '<div style="color:var(--muted);padding:1rem;text-align:center">No stream requests found in the log range. Try increasing the line count or running a test from the Test Suite tab.</div>'
+  }
+  body.innerHTML = h
+}
+
+// ── AIOStreams Test Suite ──
+const AIO_TEST_TITLES = [
+  { imdb: 'tt0468569', type: 'movie', name: 'The Dark Knight' },
+  { imdb: 'tt1375666', type: 'movie', name: 'Inception' },
+  { imdb: 'tt15398776', type: 'movie', name: 'Oppenheimer' },
+  { imdb: 'tt0111161', type: 'movie', name: 'Shawshank Redemption' },
+  { imdb: 'tt0816692', type: 'movie', name: 'Interstellar' },
+  { imdb: 'tt0903747:3:7', type: 'series', name: 'Breaking Bad S03E07' },
+  { imdb: 'tt0944947:1:1', type: 'series', name: 'Game of Thrones S01E01' },
+  { imdb: 'tt2861424:2:1', type: 'series', name: 'Rick and Morty S02E01' },
+  { imdb: 'tt0388629:1:1', type: 'series', name: 'One Piece S01E01' },
+  { imdb: 'tt10676052', type: 'movie', name: 'Deadpool & Wolverine' },
+]
+let testQuickPicksInit = false
+
+function initTestSuite() {
+  if (testQuickPicksInit) return
+  testQuickPicksInit = true
+  const picks = document.getElementById('test-quickpicks')
+  if (!picks) return
+  for (const t of AIO_TEST_TITLES) {
+    const chip = document.createElement('span')
+    chip.className = 'az-chip'
+    chip.textContent = t.name
+    chip.title = `${t.type}: ${t.imdb}`
+    chip.onclick = () => { document.getElementById('test-imdb').value = t.imdb; document.getElementById('test-type').value = t.type }
+    picks.appendChild(chip)
+  }
+}
+
+async function runAioTest() {
+  const imdb = document.getElementById('test-imdb').value.trim()
+  const type = document.getElementById('test-type').value
+  if (!imdb) { document.getElementById('test-status').textContent = 'Enter an IMDB ID'; return }
+  const btn = document.getElementById('test-run-btn')
+  const status = document.getElementById('test-status')
+  const results = document.getElementById('test-results')
+  btn.disabled = true
+  status.textContent = `Testing ${imdb}...`
+  const d = await safeJson('/api/aiostreams/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imdb, type }) })
+  btn.disabled = false
+  if (!d) { status.textContent = 'Test failed'; return }
+  status.textContent = `Done \u2014 ${d.streams?.length || 0} streams in ${d.latency_ms || '?'}ms`
+  let h = `<div style="margin-top:.5rem;padding:.5rem;background:var(--card);border:1px solid var(--border);border-radius:8px">`
+  h += `<div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.4rem"><strong style="color:var(--accent2)">${esc(imdb)}</strong><span style="font-size:.68rem;color:var(--muted)">${esc(type)}</span><span style="font-size:.68rem;color:var(--ok);margin-left:auto">${d.streams?.length || 0} streams</span><span style="font-size:.68rem;color:var(--muted)">${d.latency_ms || '?'}ms</span></div>`
+  if (d.error) h += `<div style="color:var(--err);font-size:.72rem;padding:.3rem">${esc(d.error)}</div>`
+  if (d.streams?.length) {
+    h += `<div style="max-height:200px;overflow-y:auto;font-size:.65rem;font-family:monospace;color:#94a3b8">`
+    for (const s of d.streams.slice(0, 20)) h += `<div style="padding:.15rem 0;border-bottom:1px solid #13172a">${esc(s.name || s.title || 'Unknown')}</div>`
+    if (d.streams.length > 20) h += `<div style="color:var(--muted);padding:.15rem 0">...and ${d.streams.length - 20} more</div>`
+    h += '</div>'
+  }
+  h += '</div>'
+  results.innerHTML = h + results.innerHTML
+}
+
+async function runAioTestSuite() {
+  const status = document.getElementById('test-status')
+  const results = document.getElementById('test-results')
+  results.innerHTML = ''
+  for (let i = 0; i < AIO_TEST_TITLES.length; i++) {
+    const t = AIO_TEST_TITLES[i]
+    status.textContent = `[${i + 1}/${AIO_TEST_TITLES.length}] Testing ${t.name}...`
+    document.getElementById('test-imdb').value = t.imdb
+    document.getElementById('test-type').value = t.type
+    await runAioTest()
+    if (i < AIO_TEST_TITLES.length - 1) await new Promise(r => setTimeout(r, 500))
+  }
+  status.textContent = `Suite complete \u2014 ${AIO_TEST_TITLES.length} titles tested`
+  setTimeout(loadAnalyzer, 2000)
 }
 
 // ── Init ──
