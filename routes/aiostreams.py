@@ -254,6 +254,13 @@ def _parse_logs(lines: list[str]) -> dict:
     if current_request is not None:
         requests.append(current_request)
 
+    # Compute duration from addon times if not set from HTTP response
+    for req in requests:
+        if req["duration_s"] is None and req["addons"]:
+            addon_times = [a["time_s"] for a in req["addons"] if a["time_s"] is not None]
+            if addon_times:
+                req["duration_s"] = round(max(addon_times), 2)
+
     # Build time range
     time_range = {
         "start": all_timestamps[0] if all_timestamps else None,
@@ -296,7 +303,7 @@ def _parse_logs(lines: list[str]) -> dict:
         "avg_streams": (
             round(sum(all_stream_counts) / len(all_stream_counts), 1)
             if all_stream_counts
-            else 0,
+            else 0
         ),
         "fastest_s": round(min(all_durations), 2) if all_durations else None,
         "slowest_s": round(max(all_durations), 2) if all_durations else None,

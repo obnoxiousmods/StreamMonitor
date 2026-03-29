@@ -902,29 +902,36 @@
         </div>
         <!-- AIOStreams Test Suite -->
         <div id="mt-testsuite" class="mpanel">
-          <div style="margin-bottom: 0.7rem">
-            <div style="font-size: 0.72rem; color: var(--accent2); font-weight: 700; margin-bottom: 0.5rem">
-              STREAM LOOKUP TEST
+          <!-- Manual test -->
+          <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.6rem;flex-shrink:0">
+            <select id="test-type" style="min-width:0;width:80px">
+              <option value="movie">Movie</option>
+              <option value="series">Series</option>
+            </select>
+            <input type="text" id="test-imdb" placeholder="tt0468569 or tt0903747:3:7" style="width:200px;font-family:monospace;font-size:.72rem">
+            <button class="sm" id="test-run-btn" onclick="runAioTest()">Run Test</button>
+            <button class="sm" onclick="runAioTestSuite('popular')">Popular (5)</button>
+            <button class="sm" onclick="runAioTestSuite('movies')">Movies (8)</button>
+            <button class="sm" onclick="runAioTestSuite('series')">Series (7)</button>
+            <button class="sm" onclick="runAioTestSuite('all')">Full Suite (20)</button>
+            <span id="test-status" style="font-size:.62rem;color:var(--muted);margin-left:auto"></span>
+          </div>
+          <!-- Quick picks by category -->
+          <div id="test-quickpicks" style="margin-bottom:.6rem;flex-shrink:0"></div>
+          <!-- Progress bar -->
+          <div id="test-progress-wrap" style="display:none;margin-bottom:.6rem;flex-shrink:0">
+            <div style="display:flex;justify-content:space-between;font-size:.6rem;color:var(--muted);margin-bottom:.15rem">
+              <span id="test-progress-label">Running...</span>
+              <span id="test-progress-pct">0%</span>
             </div>
-            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
-              <select id="test-type" style="min-width: 0; width: 90px">
-                <option value="movie">Movie</option>
-                <option value="series">Series</option>
-              </select>
-              <input
-                type="text"
-                id="test-imdb"
-                placeholder="tt0468569 or tt0903747:3:7"
-                style="width: 220px; font-family: monospace; font-size: 0.75rem"
-              />
-              <button class="sm" id="test-run-btn" onclick="runAioTest()">Run Test</button>
-              <button class="sm" onclick="runAioTestSuite()">Run Suite (10 titles)</button>
-              <span id="test-status" style="font-size: 0.65rem; color: var(--muted); margin-left: auto"></span>
+            <div style="height:4px;background:#1a1f35;border-radius:2px;overflow:hidden">
+              <div id="test-progress-bar" style="height:100%;background:var(--accent);border-radius:2px;width:0%;transition:width .3s"></div>
             </div>
           </div>
-          <div style="font-size: 0.65rem; color: var(--muted); margin-bottom: 0.5rem">Quick picks:</div>
-          <div style="display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.7rem" id="test-quickpicks"></div>
-          <div id="test-results" style="overflow-y: auto; flex: 1; min-height: 0"></div>
+          <!-- Aggregate summary (shown after suite) -->
+          <div id="test-summary" style="display:none;margin-bottom:.6rem;flex-shrink:0"></div>
+          <!-- Results table -->
+          <div id="test-results" style="overflow-y:auto;flex:1;min-height:0"></div>
         </div>
       </div>
     </div>

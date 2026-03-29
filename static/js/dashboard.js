@@ -2107,74 +2107,161 @@ function renderAnalyzer(d) {
 }
 
 // ── AIOStreams Test Suite ──
-const AIO_TEST_TITLES = [
-  { imdb: 'tt0468569', type: 'movie', name: 'The Dark Knight' },
-  { imdb: 'tt1375666', type: 'movie', name: 'Inception' },
-  { imdb: 'tt15398776', type: 'movie', name: 'Oppenheimer' },
-  { imdb: 'tt0111161', type: 'movie', name: 'Shawshank Redemption' },
-  { imdb: 'tt0816692', type: 'movie', name: 'Interstellar' },
-  { imdb: 'tt0903747:3:7', type: 'series', name: 'Breaking Bad S03E07' },
-  { imdb: 'tt0944947:1:1', type: 'series', name: 'Game of Thrones S01E01' },
-  { imdb: 'tt2861424:2:1', type: 'series', name: 'Rick and Morty S02E01' },
-  { imdb: 'tt0388629:1:1', type: 'series', name: 'One Piece S01E01' },
-  { imdb: 'tt10676052', type: 'movie', name: 'Deadpool & Wolverine' },
-]
+const AIO_TESTS = {
+  popular: [
+    { imdb: 'tt0468569', type: 'movie', name: 'The Dark Knight' },
+    { imdb: 'tt1375666', type: 'movie', name: 'Inception' },
+    { imdb: 'tt15398776', type: 'movie', name: 'Oppenheimer' },
+    { imdb: 'tt0903747:3:7', type: 'series', name: 'Breaking Bad S03E07' },
+    { imdb: 'tt0944947:1:1', type: 'series', name: 'Game of Thrones S01E01' },
+  ],
+  movies: [
+    { imdb: 'tt0468569', type: 'movie', name: 'The Dark Knight' },
+    { imdb: 'tt1375666', type: 'movie', name: 'Inception' },
+    { imdb: 'tt15398776', type: 'movie', name: 'Oppenheimer' },
+    { imdb: 'tt0111161', type: 'movie', name: 'Shawshank Redemption' },
+    { imdb: 'tt0816692', type: 'movie', name: 'Interstellar' },
+    { imdb: 'tt10676052', type: 'movie', name: 'Deadpool & Wolverine' },
+    { imdb: 'tt6718170', type: 'movie', name: 'The Super Mario Bros. Movie' },
+    { imdb: 'tt0118799', type: 'movie', name: 'Life Is Beautiful' },
+  ],
+  series: [
+    { imdb: 'tt0903747:3:7', type: 'series', name: 'Breaking Bad S03E07' },
+    { imdb: 'tt0944947:1:1', type: 'series', name: 'Game of Thrones S01E01' },
+    { imdb: 'tt2861424:2:1', type: 'series', name: 'Rick and Morty S02E01' },
+    { imdb: 'tt0388629:1:1', type: 'series', name: 'One Piece S01E01' },
+    { imdb: 'tt11280740:1:1', type: 'series', name: 'Severance S01E01' },
+    { imdb: 'tt7366338:1:1', type: 'series', name: 'Chernobyl S01E01' },
+    { imdb: 'tt0877057:1:1', type: 'series', name: 'Death Note S01E01' },
+  ],
+}
+AIO_TESTS.all = [...AIO_TESTS.movies, ...AIO_TESTS.series.filter(t => !AIO_TESTS.movies.find(m => m.imdb === t.imdb))]
+
 let testQuickPicksInit = false
+let suiteResults = []
 
 function initTestSuite() {
   if (testQuickPicksInit) return
   testQuickPicksInit = true
   const picks = document.getElementById('test-quickpicks')
   if (!picks) return
-  for (const t of AIO_TEST_TITLES) {
-    const chip = document.createElement('span')
-    chip.className = 'az-chip'
-    chip.textContent = t.name
-    chip.title = `${t.type}: ${t.imdb}`
-    chip.onclick = () => { document.getElementById('test-imdb').value = t.imdb; document.getElementById('test-type').value = t.type }
-    picks.appendChild(chip)
+  const cats = { 'Movies': AIO_TESTS.movies, 'Series': AIO_TESTS.series }
+  for (const [cat, titles] of Object.entries(cats)) {
+    const label = document.createElement('span')
+    label.style.cssText = 'font-size:.55rem;color:var(--accent2);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-right:.1rem'
+    label.textContent = cat
+    picks.appendChild(label)
+    for (const t of titles) {
+      const chip = document.createElement('span')
+      chip.className = 'az-chip'
+      chip.textContent = t.name
+      chip.title = `${t.type}: ${t.imdb}`
+      chip.onclick = () => { document.getElementById('test-imdb').value = t.imdb; document.getElementById('test-type').value = t.type }
+      picks.appendChild(chip)
+    }
+    picks.appendChild(document.createElement('br'))
   }
 }
 
-async function runAioTest() {
+async function runAioTest(appendToTable) {
   const imdb = document.getElementById('test-imdb').value.trim()
   const type = document.getElementById('test-type').value
-  if (!imdb) { document.getElementById('test-status').textContent = 'Enter an IMDB ID'; return }
+  if (!imdb) { document.getElementById('test-status').textContent = 'Enter an IMDB ID'; return null }
   const btn = document.getElementById('test-run-btn')
   const status = document.getElementById('test-status')
-  const results = document.getElementById('test-results')
   btn.disabled = true
-  status.textContent = `Testing ${imdb}...`
+  if (!appendToTable) status.textContent = `Testing ${imdb}...`
+  const t0 = performance.now()
   const d = await safeJson('/api/aiostreams/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imdb, type }) })
   btn.disabled = false
-  if (!d) { status.textContent = 'Test failed'; return }
-  status.textContent = `Done \u2014 ${d.streams?.length || 0} streams in ${d.latency_ms || '?'}ms`
-  let h = `<div style="margin-top:.5rem;padding:.5rem;background:var(--card);border:1px solid var(--border);border-radius:8px">`
-  h += `<div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.4rem"><strong style="color:var(--accent2)">${esc(imdb)}</strong><span style="font-size:.68rem;color:var(--muted)">${esc(type)}</span><span style="font-size:.68rem;color:var(--ok);margin-left:auto">${d.streams?.length || 0} streams</span><span style="font-size:.68rem;color:var(--muted)">${d.latency_ms || '?'}ms</span></div>`
-  if (d.error) h += `<div style="color:var(--err);font-size:.72rem;padding:.3rem">${esc(d.error)}</div>`
-  if (d.streams?.length) {
-    h += `<div style="max-height:200px;overflow-y:auto;font-size:.65rem;font-family:monospace;color:#94a3b8">`
-    for (const s of d.streams.slice(0, 20)) h += `<div style="padding:.15rem 0;border-bottom:1px solid #13172a">${esc(s.name || s.title || 'Unknown')}</div>`
-    if (d.streams.length > 20) h += `<div style="color:var(--muted);padding:.15rem 0">...and ${d.streams.length - 20} more</div>`
-    h += '</div>'
+  if (!d) { if (!appendToTable) status.textContent = 'Test failed'; return null }
+  const result = { imdb, type, streams: d.stream_count || 0, latency_ms: d.latency_ms || Math.round(performance.now() - t0), error: d.error || null, streamList: d.streams || [] }
+  if (!appendToTable) {
+    status.textContent = `Done \u2014 ${result.streams} streams in ${result.latency_ms}ms`
+    renderSingleResult(result)
   }
-  h += '</div>'
-  results.innerHTML = h + results.innerHTML
+  return result
 }
 
-async function runAioTestSuite() {
+function renderSingleResult(r) {
+  const el = document.getElementById('test-results')
+  const latColor = r.latency_ms > 10000 ? 'var(--err)' : r.latency_ms > 3000 ? 'var(--warn)' : 'var(--ok)'
+  let h = `<div style="padding:.4rem .5rem;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:.4rem;cursor:pointer" onclick="this.querySelector('.test-detail').style.display=this.querySelector('.test-detail').style.display==='none'?'block':'none'">`
+  h += `<div style="display:flex;gap:.5rem;align-items:center;font-size:.72rem">`
+  h += `<code style="color:var(--accent2);min-width:150px">${esc(r.imdb)}</code>`
+  h += `<span style="color:var(--muted);min-width:45px">${esc(r.type)}</span>`
+  h += `<span style="color:var(--accent2);font-weight:700;min-width:55px">${r.streams} streams</span>`
+  h += `<span style="color:${latColor};min-width:65px">${(r.latency_ms / 1000).toFixed(2)}s</span>`
+  if (r.error) h += `<span style="color:var(--err);font-size:.62rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.error)}</span>`
+  h += '</div>'
+  h += `<div class="test-detail" style="display:none;margin-top:.3rem;max-height:150px;overflow-y:auto;font-size:.62rem;font-family:monospace;color:#94a3b8">`
+  if (r.streamList.length) {
+    for (const s of r.streamList.slice(0, 30)) h += `<div style="padding:.1rem 0;border-bottom:1px solid #13172a">${esc(s.name || s.title || 'Unknown')}</div>`
+    if (r.streamList.length > 30) h += `<div style="color:var(--muted)">...and ${r.streamList.length - 30} more</div>`
+  } else h += '<div style="color:var(--muted)">No streams returned</div>'
+  h += '</div></div>'
+  el.innerHTML = h + el.innerHTML
+}
+
+function renderSuiteSummary(results) {
+  const summary = document.getElementById('test-summary')
+  const total = results.length
+  const withStreams = results.filter(r => r.streams > 0).length
+  const totalStreams = results.reduce((a, r) => a + r.streams, 0)
+  const avgStreams = total > 0 ? (totalStreams / total).toFixed(1) : 0
+  const avgLatency = total > 0 ? (results.reduce((a, r) => a + r.latency_ms, 0) / total / 1000).toFixed(2) : 0
+  const errors = results.filter(r => r.error).length
+  const fastest = total > 0 ? Math.min(...results.map(r => r.latency_ms)) : 0
+  const slowest = total > 0 ? Math.max(...results.map(r => r.latency_ms)) : 0
+
+  summary.style.display = 'block'
+  summary.innerHTML = `<div class="az-summary">
+    ${azStat(total, 'TITLES TESTED')}
+    ${azStat(withStreams + '/' + total, 'WITH STREAMS')}
+    ${azStat(totalStreams, 'TOTAL STREAMS')}
+    ${azStat(avgStreams, 'AVG STREAMS')}
+    ${azStat(avgLatency + 's', 'AVG LATENCY')}
+    ${azStat((fastest / 1000).toFixed(2) + 's', 'FASTEST')}
+    ${azStat((slowest / 1000).toFixed(2) + 's', 'SLOWEST')}
+    ${azStat(errors, 'ERRORS')}
+  </div>`
+}
+
+async function runAioTestSuite(category) {
+  const titles = AIO_TESTS[category || 'popular'] || AIO_TESTS.popular
   const status = document.getElementById('test-status')
   const results = document.getElementById('test-results')
+  const progressWrap = document.getElementById('test-progress-wrap')
+  const progressBar = document.getElementById('test-progress-bar')
+  const progressLabel = document.getElementById('test-progress-label')
+  const progressPct = document.getElementById('test-progress-pct')
+  const summary = document.getElementById('test-summary')
+
   results.innerHTML = ''
-  for (let i = 0; i < AIO_TEST_TITLES.length; i++) {
-    const t = AIO_TEST_TITLES[i]
-    status.textContent = `[${i + 1}/${AIO_TEST_TITLES.length}] Testing ${t.name}...`
+  summary.style.display = 'none'
+  progressWrap.style.display = 'block'
+  suiteResults = []
+
+  for (let i = 0; i < titles.length; i++) {
+    const t = titles[i]
+    const pct = ((i + 1) / titles.length * 100).toFixed(0)
+    progressLabel.textContent = `[${i + 1}/${titles.length}] ${t.name}`
+    progressPct.textContent = pct + '%'
+    progressBar.style.width = pct + '%'
+    status.textContent = `Testing ${t.name}...`
     document.getElementById('test-imdb').value = t.imdb
     document.getElementById('test-type').value = t.type
-    await runAioTest()
-    if (i < AIO_TEST_TITLES.length - 1) await new Promise(r => setTimeout(r, 500))
+    const r = await runAioTest(true)
+    if (r) {
+      suiteResults.push(r)
+      renderSingleResult(r)
+    }
+    if (i < titles.length - 1) await new Promise(resolve => setTimeout(resolve, 300))
   }
-  status.textContent = `Suite complete \u2014 ${AIO_TEST_TITLES.length} titles tested`
+
+  progressWrap.style.display = 'none'
+  status.textContent = `Suite complete \u2014 ${titles.length} titles tested`
+  renderSuiteSummary(suiteResults)
   setTimeout(loadAnalyzer, 2000)
 }
 
