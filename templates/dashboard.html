@@ -1,562 +1,943 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>StreamMonitor - Infrastructure Dashboard</title>
-<meta name="description" content="Real-time infrastructure monitoring dashboard for streaming services, media servers, and system health">
-<meta name="robots" content="noindex,nofollow">
-<meta name="theme-color" content="#0a0c14">
-<meta property="og:title" content="StreamMonitor">
-<meta property="og:description" content="Infrastructure monitoring dashboard for streaming and media services">
-<meta property="og:type" content="website">
-<link rel="stylesheet" href="/static/css/main.css">
-</head>
-<body>
-<header>
-  <h1>&#x1F4E1; StreamMonitor</h1>
-  <div class="hdr-mid" id="overview"></div>
-  <div class="hdr-right">
-    <span id="ts-hdr" style="font-size:.68rem;color:var(--muted)"></span>
-    <a class="so" href="/logout">Sign out</a>
-  </div>
-</header>
-<div class="tabs">
-  <button class="tab active" onclick="tab('s',this)">Services</button>
-  <button class="tab" onclick="tab('l',this);initLogs()">Logs</button>
-  <button class="tab" onclick="tab('p',this);initPerms()">Perms</button>
-  <button id="err-tab" class="tab" onclick="tab('e',this);loadErrors()">Errors</button>
-  <button class="tab" onclick="tab('g',this);loadSettings()">Settings</button>
-  <button class="tab" onclick="tab('j',this);loadJellyfin()">Jellyfin</button>
-  <button class="tab" onclick="tab('sp',this)">Speed</button>
-  <button class="tab" onclick="tab('b',this);initBench()">Benchmark</button>
-  <button class="tab" onclick="tab('a',this)">API</button>
-</div>
-
-<div id="p-s" class="panel active">
-  <div id="ts"></div>
-  <div id="cats"></div>
-</div>
-
-<div id="p-l" class="panel">
-  <div class="toolbar">
-    <select id="unit" onchange="fetchLogs()">{{ units_html|safe }}</select>
-    <select id="log-lines" onchange="fetchLogs()" style="min-width:0;width:100px">
-      <option value="100">100 lines</option>
-      <option value="200" selected>200 lines</option>
-      <option value="500">500 lines</option>
-    </select>
-    <input type="text" id="log-search" placeholder="Filter..." oninput="filterLogs()" style="width:130px">
-    <button class="sm" onclick="fetchLogs()">Refresh</button>
-    <label style="font-size:.68rem;color:var(--muted);display:flex;gap:.3rem;align-items:center;cursor:pointer">
-      <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
-    </label>
-    <span class="log-status" id="log-status"></span>
-  </div>
-  <div id="logbox" style="color:var(--muted)">Select a service to view logs.</div>
-</div>
-
-<div id="p-p" class="panel">
-  <div style="display:flex;gap:.7rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
-    <button class="sm" id="scan-btn" onclick="runScan()">&#x27F3; Scan directories</button>
-    <label style="font-size:.72rem;color:var(--muted);display:flex;align-items:center;gap:.3rem;cursor:pointer">
-      <input type="checkbox" id="perm-recursive"> Recursive (-R)
-    </label>
-    <label style="font-size:.72rem;color:var(--muted);display:flex;align-items:center;gap:.3rem;cursor:pointer">
-      <input type="checkbox" id="perm-issues-only" onchange="renderPermResults()"> Issues only
-    </label>
-    <select id="perm-section-filter" onchange="renderPermResults()" style="font-size:.72rem;min-width:0;width:150px">
-      <option value="">All sections</option>
-    </select>
-    <span id="scan-meta" style="font-size:.68rem;color:var(--muted);margin-left:auto"></span>
-  </div>
-  <div id="perm-results"></div>
-</div>
-
-<div id="p-e" class="panel">
-  <div style="display:flex;gap:.7rem;align-items:center;margin-bottom:.5rem;flex-wrap:wrap">
-    <select id="err-svc" onchange="filterErrors()" style="width:140px">
-      <option value="">All services</option>
-    </select>
-    <select id="err-sev" onchange="filterErrors()" style="min-width:0;width:110px">
-      <option value="">All</option>
-      <option value="error">Errors</option>
-      <option value="warning">Warnings</option>
-    </select>
-    <select id="err-sort" onchange="filterErrors()" style="min-width:0;width:140px">
-      <option value="newest">Newest first</option>
-      <option value="oldest">Oldest first</option>
-      <option value="count">Most recurring</option>
-      <option value="svc">By service</option>
-    </select>
-    <button class="sm" onclick="scanNow()">&#x27F3; Scan now</button>
-    <button class="sm" onclick="clearErrors()" style="color:var(--muted)">&#10005; Clear</button>
-    <span id="err-meta" style="font-size:.68rem;color:var(--muted);margin-left:auto"></span>
-  </div>
-  <div id="err-summary" style="font-size:.68rem;color:var(--muted);margin-bottom:.5rem;padding:.25rem 0;border-bottom:1px solid var(--border)"></div>
-  <div id="err-list" style="font-family:monospace;font-size:.72rem;line-height:1.6"></div>
-</div>
-
-<div id="p-g" class="panel">
-  <div class="settings-grid" id="settings-grid">
-    <div style="color:var(--muted);font-size:.8rem;padding:.5rem">Loading settings...</div>
-  </div>
-</div>
-
-<div id="p-j" class="panel">
-  <div style="display:flex;gap:.7rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
-    <button class="sm" onclick="loadJellyfin()">&#x27F3; Refresh</button>
-    <span id="jf-meta" style="font-size:.68rem;color:var(--muted);margin-left:auto"></span>
-  </div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start" id="jf-grid">
-    <div class="settings-sec" id="jf-sessions"><h3>Active Sessions</h3><div style="color:var(--muted);font-size:.78rem">Loading...</div></div>
-    <div class="settings-sec" id="jf-activity"><h3>Recent Activity</h3><div style="color:var(--muted);font-size:.78rem">Loading...</div></div>
-  </div>
-</div>
-
-<div id="p-sp" class="panel">
-  <iframe src="/speedtest" style="width:100%;height:700px;border:none;border-radius:10px"></iframe>
-</div>
-
-<div id="p-b" class="panel">
-  <div style="display:flex;gap:.7rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
-    <select id="bench-title" style="min-width:260px">
-      <option value="">Select a title...</option>
-    </select>
-    <button class="sm" id="bench-run-btn" onclick="runBench()">&#x25B6; Run Benchmark</button>
-    <button class="sm" onclick="runAllBench()">&#x25B6;&#x25B6; Run All (slow)</button>
-    <span id="bench-status" style="font-size:.68rem;color:var(--muted);margin-left:auto"></span>
-  </div>
-  <div id="bench-results"></div>
-</div>
-
-<div id="p-a" class="panel">
-  <b style="color:var(--accent2)">REST API Explorer</b>
-
-  <div class="api-section-title">Health &amp; Status</div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/ping</span>
-      <span class="api-desc">Unauthenticated liveness check</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns a simple pong response to verify the server is running. No authentication required.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"pong": true}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/ping')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/public</span>
-      <span class="api-desc">Unauthenticated health summary</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Public health summary with service counts and uptime. No authentication required.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"total": 12, "up": 11, "down": 1, "uptime_pct": 91.7}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/public')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/status</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Full service health + history</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns health status, latency, and history for all monitored services.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"services": {"comet": {"alive": true, "latency_ms": 42, ...}}, "timestamp": "..."}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/status')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/status/{service_id}</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Single service health</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns health status and history for a single service by its ID.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"alive": true, "latency_ms": 42, "history": [1,1,1,0,1,...]}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/status/comet')">Try it (comet)</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/stats</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">All service statistics</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns API statistics (requests, latency, errors) for all monitored services.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"comet": {"requests": 1523, "avg_ms": 38, ...}, ...}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/stats')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/stats/{service_id}</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Single service stats</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns API statistics for a single service by its ID.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"requests": 1523, "avg_ms": 38, "errors": 2}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/stats/comet')">Try it (comet)</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/versions</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Installed vs latest versions</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns installed and latest GitHub release versions for each service.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"comet": {"installed": "1.2.3", "latest": "1.2.4"}, ...}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/versions')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-section-title">Logs &amp; Errors</div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/logs/{unit}</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Journal log lines</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns recent journal log lines for the specified systemd unit. Supports <code>?n=200</code> to control line count.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"lines": ["Mar 28 12:00:01 host comet[1234]: ...", ...]}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/logs/comet')">Try it (comet)</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/dmesg</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Kernel logs</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns kernel log output (journalctl -k). Useful for diagnosing hardware and driver issues.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"lines": ["Mar 28 12:00:00 kernel: ...", ...]}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/dmesg')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/errors</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Scanned error history</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns all scanned errors and warnings from monitored services.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"errors": [{"service": "comet", "severity": "error", "line": "...", "ts": "..."}], "count": 5}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/errors')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method post">POST</span>
-      <span class="api-path">/api/errors/scan</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Trigger error scan</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Triggers an immediate scan of all service logs for errors and warnings.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"ok": true, "scanned": 12, "found": 3}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/errors/scan','POST')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method delete">DELETE</span>
-      <span class="api-path">/api/errors</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Clear error history</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Clears all stored error and warning history.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"ok": true, "cleared": 15}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/errors','DELETE')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-section-title">Service Control</div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method post">POST</span>
-      <span class="api-path">/api/service/{unit}/{action}</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Start/stop/restart a service</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Controls a systemd service. Actions: <code>start</code>, <code>stop</code>, <code>restart</code>. Unit is the systemd unit name.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"ok": true, "unit": "comet", "action": "restart"}</div>
-    </div>
-  </div>
-
-  <div class="api-section-title">Settings</div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/settings/keys</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">List API keys</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns all configured API keys (values are masked for security).</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"keys": {"TMDB": "abc...xyz", "Real-Debrid": "***...***"}}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/settings/keys')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method post">POST</span>
-      <span class="api-path">/api/settings/keys</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Update API keys</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Updates one or more API keys. Send a JSON body with key-value pairs.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example request body:</div>
-      <div class="api-response">{"TMDB": "new_api_key_here"}</div>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/settings/urls</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">List service URLs</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns all configured service URLs used for health checks.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"urls": {"comet": "http://localhost:8191", ...}}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/settings/urls')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method post">POST</span>
-      <span class="api-path">/api/settings/urls</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Update service URLs</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Updates one or more service URLs. Send a JSON body with service-URL pairs.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example request body:</div>
-      <div class="api-response">{"comet": "http://localhost:8191"}</div>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method post">POST</span>
-      <span class="api-path">/api/settings/password</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Change password</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Changes the admin password. Requires current password for verification.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example request body:</div>
-      <div class="api-response">{"current": "old_pass", "new": "new_pass"}</div>
-    </div>
-  </div>
-
-  <div class="api-section-title">Tools</div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/benchmark?imdb=ttXXXXXXX</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Run addon benchmark</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Runs a benchmark against configured addons for the given IMDB title. Returns latency, stream counts, and resolution breakdown.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"title": "...", "results": [{"name": "comet", "latency_ms": 1200, "streams": 15, ...}]}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/benchmark?imdb=tt1375666')">Try it (Inception)</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/api/jellyfin</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Sessions &amp; activity</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns active Jellyfin sessions and recent activity log.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"sessions": [...], "activity": [...]}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/jellyfin')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method post">POST</span>
-      <span class="api-path">/api/perms/scan</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Scan permissions</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Scans configured directories and reports ownership/permission mismatches.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">{"sections": [{"name": "Media", "items": [{"path": "/data", "ok": true, ...}]}]}</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();tryApi('/api/perms/scan','POST')">Try it</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method post">POST</span>
-      <span class="api-path">/api/perms/fix</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Fix permissions</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Applies ownership and permission fixes to selected paths. Send a JSON body with paths and desired permissions.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example request body:</div>
-      <div class="api-response">{"paths": ["/data/media"], "owner": "joey:joey", "mode": "775"}</div>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/speedtest</span>
-      <span class="api-auth">Auth</span>
-      <span class="api-desc">Speed test page</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Serves the speed test HTML page for running download/upload tests.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example: Open in browser</div>
-      <div class="api-response">HTML page</div>
-      <button class="api-try-btn" onclick="event.stopPropagation();window.open('/speedtest','_blank')">Open in new tab</button>
-    </div>
-  </div>
-
-  <div class="api-endpoint" onclick="toggleApi(this)">
-    <div class="api-header">
-      <span class="api-method get">GET</span>
-      <span class="api-path">/speedtest/download?mb=25</span>
-      <span class="api-desc">Download endpoint (rate-limited)</span>
-    </div>
-    <div class="api-detail">
-      <div style="color:var(--muted);margin-bottom:.3rem">Returns a binary payload of the specified size for speed testing. No authentication required but rate-limited. Adjust <code>mb</code> parameter for payload size.</div>
-      <div style="font-size:.65rem;color:var(--muted2);margin-bottom:.2rem">Example response:</div>
-      <div class="api-response">Binary data (25 MB)</div>
-    </div>
-  </div>
-
-</div>
-
-<!-- Service Modal -->
-<div id="svc-modal" class="modal-overlay" onclick="if(event.target===this)closeModal()">
-  <div class="modal">
-    <div class="modal-hdr">
-      <div class="modal-title">
-        <span id="modal-name">Service</span>
-        <span id="modal-badge-sys" class="sbadge sys-up">SYS</span>
-        <span id="modal-badge-http" class="sbadge http-up" style="display:none">HTTP</span>
-        <span id="modal-lat" class="lat" style="font-size:.68rem"></span>
-        <a id="modal-weburl" class="modal-url" target="_blank" rel="noopener" style="display:none">&#x2197; Open</a>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>StreamMonitor - Infrastructure Dashboard</title>
+    <meta
+      name="description"
+      content="Real-time infrastructure monitoring dashboard for streaming services, media servers, and system health"
+    />
+    <meta name="robots" content="noindex,nofollow" />
+    <meta name="theme-color" content="#0a0c14" />
+    <meta property="og:title" content="StreamMonitor" />
+    <meta property="og:description" content="Infrastructure monitoring dashboard for streaming and media services" />
+    <meta property="og:type" content="website" />
+    <link rel="stylesheet" href="/static/css/main.css" />
+  </head>
+  <body>
+    <header>
+      <h1>&#x1F4E1; StreamMonitor</h1>
+      <div class="hdr-mid" id="overview"></div>
+      <div class="hdr-right">
+        <span id="ts-hdr" style="font-size: 0.68rem; color: var(--muted)"></span>
+        <a class="so" href="/logout">Sign out</a>
       </div>
-      <button class="modal-close" onclick="closeModal()">&#x2715;</button>
+    </header>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('s', this)">Services</button>
+      <button
+        class="tab"
+        onclick="
+          switchTab('l', this)
+          initLogs()
+        "
+      >
+        Logs
+      </button>
+      <button
+        class="tab"
+        onclick="
+          switchTab('p', this)
+          initPermissions()
+        "
+      >
+        Perms
+      </button>
+      <button
+        id="err-tab"
+        class="tab"
+        onclick="
+          switchTab('e', this)
+          loadErrors()
+        "
+      >
+        Errors
+      </button>
+      <button
+        class="tab"
+        onclick="
+          switchTab('g', this)
+          loadSettings()
+        "
+      >
+        Settings
+      </button>
+      <button
+        class="tab"
+        onclick="
+          switchTab('j', this)
+          loadJellyfin()
+        "
+      >
+        Jellyfin
+      </button>
+      <button class="tab" onclick="switchTab('sp', this)">Speed</button>
+      <button
+        class="tab"
+        onclick="
+          switchTab('b', this)
+          initBenchmark()
+        "
+      >
+        Benchmark
+      </button>
+      <button class="tab" onclick="switchTab('a', this)">API</button>
     </div>
-    <div class="modal-meta">
-      <span id="modal-msg"></span>
-      <span id="modal-unit" style="font-family:monospace;color:var(--border-active,#374162)"></span>
-      <span id="modal-ts" style="margin-left:auto"></span>
+
+    <div id="p-s" class="panel active">
+      <div id="ts"></div>
+      <div id="cats"></div>
     </div>
-    <div class="mtabs">
-      <button class="mtab active" onclick="openMTab('overview',this)">Overview</button>
-      <button class="mtab" onclick="openMTab('logs',this)">Logs</button>
-      <button class="mtab" onclick="openMTab('controls',this)">Controls</button>
-    </div>
-    <div id="mt-overview" class="mpanel active">
-      <div id="modal-stats-body"></div>
-      <div id="modal-version-body" style="margin-top:.4rem"></div>
-      <div id="modal-history-body" style="margin-top:.5rem"></div>
-    </div>
-    <div id="mt-logs" class="mpanel">
-      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;flex-shrink:0">
-        <select id="modal-log-lines" onchange="modalFetchLogs()" style="min-width:0;width:100px">
+
+    <div id="p-l" class="panel">
+      <div class="toolbar">
+        <select id="unit" onchange="fetchLogs()">
+          {{ units_html|safe }}
+        </select>
+        <select id="log-lines" onchange="fetchLogs()" style="min-width: 0; width: 100px">
           <option value="100">100 lines</option>
           <option value="200" selected>200 lines</option>
           <option value="500">500 lines</option>
         </select>
-        <input type="text" id="modal-log-search" placeholder="Filter..." oninput="modalFilterLogs()" style="width:130px">
-        <button class="sm" onclick="modalFetchLogs()">Refresh</button>
-        <span id="modal-log-status" style="font-size:.65rem;color:var(--muted);margin-left:auto"></span>
+        <input type="text" id="log-search" placeholder="Filter..." oninput="filterLogs()" style="width: 130px" />
+        <button class="sm" onclick="fetchLogs()">Refresh</button>
+        <label
+          style="
+            font-size: 0.68rem;
+            color: var(--muted);
+            display: flex;
+            gap: 0.3rem;
+            align-items: center;
+            cursor: pointer;
+          "
+        >
+          <input type="checkbox" id="log-autoscroll" checked /> Auto-scroll
+        </label>
+        <span class="log-status" id="log-status"></span>
       </div>
-      <div id="modal-logbox" style="color:var(--muted)">Select Logs tab to load.</div>
+      <div id="logbox" style="color: var(--muted)">Select a service to view logs.</div>
     </div>
-    <div id="mt-controls" class="mpanel">
-      <div class="ctrl-grid">
-        <button class="ctrl-btn start" onclick="svcAction('start')">&#9654; Start</button>
-        <button class="ctrl-btn stop"  onclick="svcAction('stop')">&#9632; Stop</button>
-        <button class="ctrl-btn restart" onclick="svcAction('restart')">&#x27F3; Restart</button>
-        <button class="ctrl-btn open-web" id="ctrl-open-web" style="display:none" onclick="openServiceWeb()">&#x2197; Open Web UI</button>
-      </div>
-      <div class="ctrl-output" id="ctrl-output" style="color:var(--muted)">Action output will appear here.</div>
-      <div class="ctrl-sysinfo" id="ctrl-sysinfo"></div>
-    </div>
-  </div>
-</div>
 
-<script>
-const WEB_URLS = {{ web_urls_json|safe }};
-const BENCH_TITLES = {{ bench_titles_json|safe }};
-const SPEEDTEST_DIRECT_URL = {{ speedtest_direct_url|tojson }};
-const SPEEDTEST_DIRECT_NAME = {{ speedtest_direct_name|tojson }};
-const SPEEDTEST_CF_URL = {{ speedtest_cf_url|tojson }};
-const SPEEDTEST_CF_NAME = {{ speedtest_cf_name|tojson }};
-</script>
-<script src="/static/js/dashboard.js"></script>
-</body></html>
+    <div id="p-p" class="panel">
+      <div style="display: flex; gap: 0.7rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap">
+        <button class="sm" id="scan-btn" onclick="runPermissionScan()">&#x27F3; Scan directories</button>
+        <label
+          style="
+            font-size: 0.72rem;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            cursor: pointer;
+          "
+        >
+          <input type="checkbox" id="perm-recursive" /> Recursive (-R)
+        </label>
+        <label
+          style="
+            font-size: 0.72rem;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            cursor: pointer;
+          "
+        >
+          <input type="checkbox" id="perm-issues-only" onchange="renderPermissionResults()" /> Issues only
+        </label>
+        <select
+          id="perm-section-filter"
+          onchange="renderPermissionResults()"
+          style="font-size: 0.72rem; min-width: 0; width: 150px"
+        >
+          <option value="">All sections</option>
+        </select>
+        <span id="scan-meta" style="font-size: 0.68rem; color: var(--muted); margin-left: auto"></span>
+      </div>
+      <div id="perm-results"></div>
+    </div>
+
+    <div id="p-e" class="panel">
+      <div style="display: flex; gap: 0.7rem; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap">
+        <select id="err-svc" onchange="filterErrors()" style="width: 140px">
+          <option value="">All services</option>
+        </select>
+        <select id="err-sev" onchange="filterErrors()" style="min-width: 0; width: 110px">
+          <option value="">All</option>
+          <option value="error">Errors</option>
+          <option value="warning">Warnings</option>
+        </select>
+        <select id="err-sort" onchange="filterErrors()" style="min-width: 0; width: 140px">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="count">Most recurring</option>
+          <option value="svc">By service</option>
+        </select>
+        <button class="sm" onclick="scanErrorsNow()">&#x27F3; Scan now</button>
+        <button class="sm" onclick="clearErrors()" style="color: var(--muted)">&#10005; Clear</button>
+        <span id="err-meta" style="font-size: 0.68rem; color: var(--muted); margin-left: auto"></span>
+      </div>
+      <div
+        id="err-summary"
+        style="
+          font-size: 0.68rem;
+          color: var(--muted);
+          margin-bottom: 0.5rem;
+          padding: 0.25rem 0;
+          border-bottom: 1px solid var(--border);
+        "
+      ></div>
+      <div id="err-list" style="font-family: monospace; font-size: 0.72rem; line-height: 1.6"></div>
+    </div>
+
+    <div id="p-g" class="panel">
+      <div class="settings-grid" id="settings-grid">
+        <div style="color: var(--muted); font-size: 0.8rem; padding: 0.5rem">Loading settings...</div>
+      </div>
+    </div>
+
+    <div id="p-j" class="panel">
+      <div style="display: flex; gap: 0.7rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap">
+        <button class="sm" onclick="loadJellyfin()">&#x27F3; Refresh</button>
+        <span id="jf-meta" style="font-size: 0.68rem; color: var(--muted); margin-left: auto"></span>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start" id="jf-grid">
+        <div class="settings-sec" id="jf-sessions">
+          <h3>Active Sessions</h3>
+          <div style="color: var(--muted); font-size: 0.78rem">Loading...</div>
+        </div>
+        <div class="settings-sec" id="jf-activity">
+          <h3>Recent Activity</h3>
+          <div style="color: var(--muted); font-size: 0.78rem">Loading...</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="p-sp" class="panel">
+      <iframe src="/speedtest" style="width: 100%; height: 700px; border: none; border-radius: 10px"></iframe>
+    </div>
+
+    <div id="p-b" class="panel">
+      <div style="display: flex; gap: 0.7rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap">
+        <select id="bench-title" style="min-width: 260px">
+          <option value="">Select a title...</option>
+        </select>
+        <button class="sm" id="bench-run-btn" onclick="runBenchmark()">&#x25B6; Run Benchmark</button>
+        <button class="sm" onclick="runAllBenchmarks()">&#x25B6;&#x25B6; Run All (slow)</button>
+        <span id="bench-status" style="font-size: 0.68rem; color: var(--muted); margin-left: auto"></span>
+      </div>
+      <div id="bench-results"></div>
+    </div>
+
+    <div id="p-a" class="panel">
+      <b style="color: var(--accent2)">REST API Explorer</b>
+
+      <div class="api-section-title">Health &amp; Status</div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/ping</span>
+          <span class="api-desc">Unauthenticated liveness check</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns a simple pong response to verify the server is running. No authentication required.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"pong": true}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/ping')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/public</span>
+          <span class="api-desc">Unauthenticated health summary</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Public health summary with service counts and uptime. No authentication required.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"total": 12, "up": 11, "down": 1, "uptime_pct": 91.7}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/public')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/status</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Full service health + history</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns health status, latency, and history for all monitored services.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">
+            {"services": {"comet": {"alive": true, "latency_ms": 42, ...}}, "timestamp": "..."}
+          </div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/status')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/status/{service_id}</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Single service health</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns health status and history for a single service by its ID.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"alive": true, "latency_ms": 42, "history": [1,1,1,0,1,...]}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/status/comet')
+            "
+          >
+            Try it (comet)
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/stats</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">All service statistics</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns API statistics (requests, latency, errors) for all monitored services.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"comet": {"requests": 1523, "avg_ms": 38, ...}, ...}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/stats')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/stats/{service_id}</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Single service stats</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns API statistics for a single service by its ID.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"requests": 1523, "avg_ms": 38, "errors": 2}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/stats/comet')
+            "
+          >
+            Try it (comet)
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/versions</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Installed vs latest versions</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns installed and latest GitHub release versions for each service.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"comet": {"installed": "1.2.3", "latest": "1.2.4"}, ...}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/versions')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-section-title">Logs &amp; Errors</div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/logs/{unit}</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Journal log lines</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns recent journal log lines for the specified systemd unit. Supports <code>?n=200</code> to control
+            line count.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"lines": ["Mar 28 12:00:01 host comet[1234]: ...", ...]}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/logs/comet')
+            "
+          >
+            Try it (comet)
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/dmesg</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Kernel logs</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns kernel log output (journalctl -k). Useful for diagnosing hardware and driver issues.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"lines": ["Mar 28 12:00:00 kernel: ...", ...]}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/dmesg')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/errors</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Scanned error history</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns all scanned errors and warnings from monitored services.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">
+            {"errors": [{"service": "comet", "severity": "error", "line": "...", "ts": "..."}], "count": 5}
+          </div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/errors')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method post">POST</span>
+          <span class="api-path">/api/errors/scan</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Trigger error scan</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Triggers an immediate scan of all service logs for errors and warnings.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"ok": true, "scanned": 12, "found": 3}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/errors/scan', 'POST')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method delete">DELETE</span>
+          <span class="api-path">/api/errors</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Clear error history</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">Clears all stored error and warning history.</div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"ok": true, "cleared": 15}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/errors', 'DELETE')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-section-title">Service Control</div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method post">POST</span>
+          <span class="api-path">/api/service/{unit}/{action}</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Start/stop/restart a service</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Controls a systemd service. Actions: <code>start</code>, <code>stop</code>, <code>restart</code>. Unit is
+            the systemd unit name.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"ok": true, "unit": "comet", "action": "restart"}</div>
+        </div>
+      </div>
+
+      <div class="api-section-title">Settings</div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/settings/keys</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">List API keys</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns all configured API keys (values are masked for security).
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"keys": {"TMDB": "abc...xyz", "Real-Debrid": "***...***"}}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/settings/keys')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method post">POST</span>
+          <span class="api-path">/api/settings/keys</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Update API keys</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Updates one or more API keys. Send a JSON body with key-value pairs.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example request body:</div>
+          <div class="api-response">{"TMDB": "new_api_key_here"}</div>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/settings/urls</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">List service URLs</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns all configured service URLs used for health checks.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"urls": {"comet": "http://localhost:8191", ...}}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/settings/urls')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method post">POST</span>
+          <span class="api-path">/api/settings/urls</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Update service URLs</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Updates one or more service URLs. Send a JSON body with service-URL pairs.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example request body:</div>
+          <div class="api-response">{"comet": "http://localhost:8191"}</div>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method post">POST</span>
+          <span class="api-path">/api/settings/password</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Change password</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Changes the admin password. Requires current password for verification.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example request body:</div>
+          <div class="api-response">{"current": "old_pass", "new": "new_pass"}</div>
+        </div>
+      </div>
+
+      <div class="api-section-title">Tools</div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/benchmark?imdb=ttXXXXXXX</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Run addon benchmark</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Runs a benchmark against configured addons for the given IMDB title. Returns latency, stream counts, and
+            resolution breakdown.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">
+            {"title": "...", "results": [{"name": "comet", "latency_ms": 1200, "streams": 15, ...}]}
+          </div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/benchmark?imdb=tt1375666')
+            "
+          >
+            Try it (Inception)
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/api/jellyfin</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Sessions &amp; activity</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns active Jellyfin sessions and recent activity log.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">{"sessions": [...], "activity": [...]}</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/jellyfin')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method post">POST</span>
+          <span class="api-path">/api/perms/scan</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Scan permissions</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Scans configured directories and reports ownership/permission mismatches.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">
+            {"sections": [{"name": "Media", "items": [{"path": "/data", "ok": true, ...}]}]}
+          </div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              tryApiEndpoint('/api/perms/scan', 'POST')
+            "
+          >
+            Try it
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method post">POST</span>
+          <span class="api-path">/api/perms/fix</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Fix permissions</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Applies ownership and permission fixes to selected paths. Send a JSON body with paths and desired
+            permissions.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example request body:</div>
+          <div class="api-response">{"paths": ["/data/media"], "owner": "joey:joey", "mode": "775"}</div>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/speedtest</span>
+          <span class="api-auth">Auth</span>
+          <span class="api-desc">Speed test page</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Serves the speed test HTML page for running download/upload tests.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example: Open in browser</div>
+          <div class="api-response">HTML page</div>
+          <button
+            class="api-try-btn"
+            onclick="
+              event.stopPropagation()
+              window.open('/speedtest', '_blank')
+            "
+          >
+            Open in new tab
+          </button>
+        </div>
+      </div>
+
+      <div class="api-endpoint" onclick="toggleApiEndpoint(this)">
+        <div class="api-header">
+          <span class="api-method get">GET</span>
+          <span class="api-path">/speedtest/download?mb=25</span>
+          <span class="api-desc">Download endpoint (rate-limited)</span>
+        </div>
+        <div class="api-detail">
+          <div style="color: var(--muted); margin-bottom: 0.3rem">
+            Returns a binary payload of the specified size for speed testing. No authentication required but
+            rate-limited. Adjust <code>mb</code> parameter for payload size.
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted2); margin-bottom: 0.2rem">Example response:</div>
+          <div class="api-response">Binary data (25 MB)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Service Modal -->
+    <div id="svc-modal" class="modal-overlay" onclick="if (event.target === this) closeModal()">
+      <div class="modal">
+        <div class="modal-hdr">
+          <div class="modal-title">
+            <span id="modal-name">Service</span>
+            <span id="modal-badge-sys" class="sbadge sys-up">SYS</span>
+            <span id="modal-badge-http" class="sbadge http-up" style="display: none">HTTP</span>
+            <span id="modal-lat" class="lat" style="font-size: 0.68rem"></span>
+            <a id="modal-weburl" class="modal-url" target="_blank" rel="noopener" style="display: none"
+              >&#x2197; Open</a
+            >
+          </div>
+          <button class="modal-close" onclick="closeModal()">&#x2715;</button>
+        </div>
+        <div class="modal-meta">
+          <span id="modal-msg"></span>
+          <span id="modal-unit" style="font-family: monospace; color: var(--border-active, #374162)"></span>
+          <span id="modal-ts" style="margin-left: auto"></span>
+        </div>
+        <div class="mtabs">
+          <button class="mtab active" onclick="openModalTab('overview', this)">Overview</button>
+          <button class="mtab" onclick="openModalTab('logs', this)">Logs</button>
+          <button class="mtab" onclick="openModalTab('controls', this)">Controls</button>
+          <button
+            class="mtab"
+            id="mtab-analyzer"
+            style="display: none"
+            onclick="
+              openModalTab('analyzer', this)
+              loadAnalyzer()
+            "
+          >
+            Analyzer
+          </button>
+          <button class="mtab" id="mtab-testsuite" style="display: none" onclick="openModalTab('testsuite', this)">
+            Test Suite
+          </button>
+        </div>
+        <div id="mt-overview" class="mpanel active">
+          <div id="modal-stats-body"></div>
+          <div id="modal-version-body" style="margin-top: 0.4rem"></div>
+          <div id="modal-history-body" style="margin-top: 0.5rem"></div>
+        </div>
+        <div id="mt-logs" class="mpanel">
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; flex-shrink: 0">
+            <select id="modal-log-lines" onchange="modalFetchLogs()" style="min-width: 0; width: 100px">
+              <option value="100">100 lines</option>
+              <option value="200" selected>200 lines</option>
+              <option value="500">500 lines</option>
+            </select>
+            <input
+              type="text"
+              id="modal-log-search"
+              placeholder="Filter..."
+              oninput="modalFilterLogs()"
+              style="width: 130px"
+            />
+            <button class="sm" onclick="modalFetchLogs()">Refresh</button>
+            <span id="modal-log-status" style="font-size: 0.65rem; color: var(--muted); margin-left: auto"></span>
+          </div>
+          <div id="modal-logbox" style="color: var(--muted)">Select Logs tab to load.</div>
+        </div>
+        <div id="mt-controls" class="mpanel">
+          <div class="ctrl-grid">
+            <button class="ctrl-btn start" onclick="serviceAction('start')">&#9654; Start</button>
+            <button class="ctrl-btn stop" onclick="serviceAction('stop')">&#9632; Stop</button>
+            <button class="ctrl-btn restart" onclick="serviceAction('restart')">&#x27F3; Restart</button>
+            <button class="ctrl-btn open-web" id="ctrl-open-web" style="display: none" onclick="openServiceWebUI()">
+              &#x2197; Open Web UI
+            </button>
+          </div>
+          <div class="ctrl-output" id="ctrl-output" style="color: var(--muted)">Action output will appear here.</div>
+          <div class="ctrl-sysinfo" id="ctrl-sysinfo"></div>
+        </div>
+        <!-- AIOStreams Analyzer -->
+        <div id="mt-analyzer" class="mpanel">
+          <div
+            style="
+              display: flex;
+              gap: 0.5rem;
+              align-items: center;
+              flex-wrap: wrap;
+              flex-shrink: 0;
+              margin-bottom: 0.7rem;
+            "
+          >
+            <select id="analyzer-lines" style="min-width: 0; width: 140px">
+              <option value="1000">Last 1000 lines</option>
+              <option value="2000">Last 2000 lines</option>
+              <option value="5000" selected>Last 5000 lines</option>
+              <option value="10000">Last 10000 lines</option>
+            </select>
+            <button class="sm" onclick="loadAnalyzer()">Refresh</button>
+            <span id="analyzer-status" style="font-size: 0.65rem; color: var(--muted); margin-left: auto"></span>
+          </div>
+          <div id="analyzer-body" style="overflow-y: auto; flex: 1; min-height: 0">
+            <div style="color: var(--muted); font-size: 0.78rem; padding: 0.5rem">
+              Click Analyzer tab to load data...
+            </div>
+          </div>
+        </div>
+        <!-- AIOStreams Test Suite -->
+        <div id="mt-testsuite" class="mpanel">
+          <div style="margin-bottom: 0.7rem">
+            <div style="font-size: 0.72rem; color: var(--accent2); font-weight: 700; margin-bottom: 0.5rem">
+              STREAM LOOKUP TEST
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap">
+              <select id="test-type" style="min-width: 0; width: 90px">
+                <option value="movie">Movie</option>
+                <option value="series">Series</option>
+              </select>
+              <input
+                type="text"
+                id="test-imdb"
+                placeholder="tt0468569 or tt0903747:3:7"
+                style="width: 220px; font-family: monospace; font-size: 0.75rem"
+              />
+              <button class="sm" id="test-run-btn" onclick="runAioTest()">Run Test</button>
+              <button class="sm" onclick="runAioTestSuite()">Run Suite (10 titles)</button>
+              <span id="test-status" style="font-size: 0.65rem; color: var(--muted); margin-left: auto"></span>
+            </div>
+          </div>
+          <div style="font-size: 0.65rem; color: var(--muted); margin-bottom: 0.5rem">Quick picks:</div>
+          <div style="display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.7rem" id="test-quickpicks"></div>
+          <div id="test-results" style="overflow-y: auto; flex: 1; min-height: 0"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const WEB_URLS = {{ web_urls_json|safe }};
+      const BENCH_TITLES = {{ bench_titles_json|safe }};
+      const SPEEDTEST_DIRECT_URL = {{ speedtest_direct_url|tojson }};
+      const SPEEDTEST_DIRECT_NAME = {{ speedtest_direct_name|tojson }};
+      const SPEEDTEST_CF_URL = {{ speedtest_cf_url|tojson }};
+      const SPEEDTEST_CF_NAME = {{ speedtest_cf_name|tojson }};
+    </script>
+    <script src="/static/js/axios.min.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+  </body>
+</html>

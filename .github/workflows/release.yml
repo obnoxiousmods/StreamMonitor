@@ -40,13 +40,14 @@ jobs:
 
       - name: Package release zip
         run: |
-          mkdir -p StreamMonitor-${{ steps.version.outputs.tag }}
-          # Copy repo contents (respecting .gitignore patterns)
-          git archive HEAD | tar -x -C StreamMonitor-${{ steps.version.outputs.tag }}
+          DIR="StreamMonitor-${{ steps.version.outputs.tag }}"
+          mkdir -p "$DIR"
+          # Copy repo contents, filtering through .gitignore patterns
+          rsync -a --exclude='.git' --filter=':- .gitignore' . "$DIR/"
           # Copy compiled binary into the package
-          cp dist/streammonitor StreamMonitor-${{ steps.version.outputs.tag }}/
+          cp dist/streammonitor "$DIR/"
           # Create zip
-          zip -r StreamMonitor-${{ steps.version.outputs.tag }}.zip StreamMonitor-${{ steps.version.outputs.tag }}/
+          zip -r "$DIR.zip" "$DIR/"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -55,7 +56,5 @@ jobs:
           name: StreamMonitor ${{ steps.version.outputs.tag }}
           draft: false
           prerelease: false
-          files: |
-            dist/streammonitor
-            StreamMonitor-${{ steps.version.outputs.tag }}.zip
+          files: StreamMonitor-${{ steps.version.outputs.tag }}.zip
           generate_release_notes: true

@@ -3,105 +3,108 @@ const endpoints = [
   { id: 'cf', label: SPEEDTEST_CF_NAME, url: SPEEDTEST_CF_URL },
 ]
 
-let running = false
+let testRunning = false
 
-async function testEndpoint(ep, mb) {
-  const bar = document.getElementById('bar-' + ep.id)
-  const res = document.getElementById('res-' + ep.id)
-  bar.style.width = '0%'
-  bar.className = 'bar-fill'
-  res.className = 'result'
-  res.textContent = 'Testing...'
+async function testEndpoint(endpoint, payloadSizeMb) {
+  const progressBar = document.getElementById('bar-' + endpoint.id)
+  const resultLabel = document.getElementById('res-' + endpoint.id)
+  progressBar.style.width = '0%'
+  progressBar.className = 'bar-fill'
+  resultLabel.className = 'result'
+  resultLabel.textContent = 'Testing...'
 
-  const url = ep.url + '?mb=' + mb + '&_t=' + Date.now()
+  const url = endpoint.url + '?mb=' + payloadSizeMb + '&_t=' + Date.now()
   try {
-    const resp = await fetch(url, { cache: 'no-store' })
-    if (!resp.ok) {
-      bar.style.width = '100%'
-      bar.classList.add('error')
-      res.className = 'result error'
-      res.textContent = resp.status === 429 ? 'Rate limited' : 'HTTP ' + resp.status
-      return { id: ep.id, label: ep.label, mbps: null, error: true }
-    }
-
-    const reader = resp.body.getReader()
-    const total = parseInt(resp.headers.get('content-length')) || mb * 1048576
     let received = 0
-    const t0 = performance.now()
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      received += value.length
-      const pct = Math.min((received / total) * 100, 100)
-      bar.style.width = pct + '%'
-    }
-
-    const elapsed = (performance.now() - t0) / 1000
+    const totalExpected = payloadSizeMb * 1048576
+    const startTime = performance.now()
+    await axios.get(url, {
+      responseType: 'arraybuffer',
+      onDownloadProgress: (e) => {
+        received = e.loaded
+        const percent = Math.min((e.loaded / (e.total || totalExpected)) * 100, 100)
+        progressBar.style.width = percent + '%'
+      },
+    })
+    const elapsed = (performance.now() - startTime) / 1000
     const mbps = ((received * 8) / elapsed / 1e6).toFixed(1)
 
-    bar.style.width = '100%'
-    bar.classList.add('done')
-    res.className = 'result speed'
-    res.textContent = mbps + ' Mbps'
-    return { id: ep.id, label: ep.label, mbps: parseFloat(mbps), error: false }
-  } catch (e) {
-    bar.style.width = '100%'
-    bar.classList.add('error')
-    res.className = 'result error'
-    res.textContent = 'Failed'
-    return { id: ep.id, label: ep.label, mbps: null, error: true }
+    progressBar.style.width = '100%'
+    progressBar.classList.add('done')
+    resultLabel.className = 'result speed'
+    resultLabel.textContent = mbps + ' Mbps'
+    return {
+      id: endpoint.id,
+      label: endpoint.label,
+      mbps: parseFloat(mbps),
+      error: false,
+    }
+  } catch (err) {
+    progressBar.style.width = '100%'
+    progressBar.classList.add('error')
+    resultLabel.className = 'result error'
+    if (err.response) {
+      resultLabel.textContent = err.response.status === 429 ? 'Rate limited' : 'HTTP ' + err.response.status
+    } else {
+      resultLabel.textContent = 'Failed'
+    }
+    return {
+      id: endpoint.id,
+      label: endpoint.label,
+      mbps: null,
+      error: true,
+    }
   }
 }
 
-async function runAll() {
-  if (running) return
-  running = true
-  const btn = document.getElementById('btn-run')
-  const status = document.getElementById('status')
-  btn.disabled = true
-  btn.textContent = 'Testing...'
-  status.textContent = ''
+async function runAllTests() {
+  if (testRunning) return
+  testRunning = true
+  const runButton = document.getElementById('btn-run')
+  const statusLabel = document.getElementById('status')
+  runButton.disabled = true
+  runButton.textContent = 'Testing...'
+  statusLabel.textContent = ''
 
-  const mb = parseInt(document.getElementById('sel-mb').value) || 25
+  const payloadSizeMb = parseInt(document.getElementById('sel-mb').value) || 25
   const results = []
 
-  for (const ep of endpoints) {
-    status.textContent = 'Testing ' + ep.label + '...'
-    results.push(await testEndpoint(ep, mb))
+  for (const endpoint of endpoints) {
+    statusLabel.textContent = 'Testing ' + endpoint.label + '...'
+    results.push(await testEndpoint(endpoint, payloadSizeMb))
   }
 
-  const sumEl = document.getElementById('summary')
-  const rowsEl = document.getElementById('summary-rows')
-  sumEl.style.display = 'block'
+  const summaryElement = document.getElementById('summary')
+  const summaryRowsElement = document.getElementById('summary-rows')
+  summaryElement.style.display = 'block'
 
-  const valid = results.filter((r) => !r.error && r.mbps != null)
-  const best = valid.length ? valid.reduce((a, b) => (a.mbps > b.mbps ? a : b)) : null
+  const validResults = results.filter((result) => !result.error && result.mbps != null)
+  const bestResult = validResults.length ? validResults.reduce((a, b) => (a.mbps > b.mbps ? a : b)) : null
 
-  let html = ''
-  for (const r of results) {
-    const win = best && r.id === best.id && valid.length > 1 ? ' winner' : ''
-    html +=
+  let summaryHtml = ''
+  for (const result of results) {
+    const winnerClass = bestResult && result.id === bestResult.id && validResults.length > 1 ? ' winner' : ''
+    summaryHtml +=
       '<div class="summary-row"><span class="k">' +
-      r.label +
+      result.label +
       '</span><span class="v' +
-      win +
+      winnerClass +
       '">' +
-      (r.error ? 'Error' : r.mbps + ' Mbps' + (win ? ' \u2605' : '')) +
+      (result.error ? 'Error' : result.mbps + ' Mbps' + (winnerClass ? ' \u2605' : '')) +
       '</span></div>'
   }
-  if (best && valid.length > 1) {
-    const diff = (best.mbps / Math.min(...valid.map((v) => v.mbps)) - 1) * 100
-    html +=
+  if (bestResult && validResults.length > 1) {
+    const speedDifference = (bestResult.mbps / Math.min(...validResults.map((v) => v.mbps)) - 1) * 100
+    summaryHtml +=
       '<div class="summary-row"><span class="k">Winner</span><span class="v winner">' +
-      best.label +
-      (diff > 1 ? ' (+' + diff.toFixed(0) + '%)' : '') +
+      bestResult.label +
+      (speedDifference > 1 ? ' (+' + speedDifference.toFixed(0) + '%)' : '') +
       '</span></div>'
   }
-  rowsEl.innerHTML = html
+  summaryRowsElement.innerHTML = summaryHtml
 
-  btn.disabled = false
-  btn.textContent = 'Run Speed Test'
-  status.textContent = 'Done'
-  running = false
+  runButton.disabled = false
+  runButton.textContent = 'Run Speed Test'
+  statusLabel.textContent = 'Done'
+  testRunning = false
 }

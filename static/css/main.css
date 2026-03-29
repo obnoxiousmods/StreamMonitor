@@ -1225,3 +1225,123 @@ code {
   color: var(--warn);
   background: var(--warn-bg);
 }
+/* ── AIOStreams Analyzer ── */
+.az-summary {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+.az-stat {
+  text-align: center;
+  padding: 0.5rem 0.7rem;
+  background: #0a0c14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex: 1;
+  min-width: 90px;
+}
+.az-stat .az-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent2);
+}
+.az-stat .az-lbl {
+  font-size: 0.58rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 0.15rem;
+}
+.az-section {
+  font-size: 0.62rem;
+  color: var(--err);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  margin: 0.8rem 0 0.4rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.az-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+.az-table th {
+  font-size: 0.58rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.25rem 0.4rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.az-table td {
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid #13172a;
+  vertical-align: middle;
+}
+.az-table tr:hover td {
+  background: #0d1025;
+}
+.az-bar-wrap {
+  width: 100%;
+  height: 6px;
+  background: #1a1f35;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.az-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+.az-bar.green {
+  background: linear-gradient(90deg, #059669, #34d399);
+}
+.az-bar.yellow {
+  background: linear-gradient(90deg, #d97706, #fbbf24);
+}
+.az-bar.red {
+  background: linear-gradient(90deg, #dc2626, #f87171);
+}
+.az-req {
+  cursor: pointer;
+  padding: 0.3rem 0.4rem;
+  border-bottom: 1px solid #13172a;
+  font-size: 0.72rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.az-req:hover {
+  background: #0d1025;
+}
+.az-req-detail {
+  display: none;
+  padding: 0.3rem 0.6rem 0.5rem;
+  background: #050710;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.68rem;
+}
+.az-req.expanded + .az-req-detail {
+  display: block;
+}
+.az-chip {
+  display: inline-block;
+  font-size: 0.58rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  transition: all 0.15s;
+}
+.az-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent2);
+}

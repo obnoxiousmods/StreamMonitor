@@ -1,4 +1,5 @@
-const CATS = {
+// ── Constants ──
+const CATEGORY_LABELS = {
   system: 'System',
   streaming: 'Streaming Stack',
   indexers: 'Indexers',
@@ -9,635 +10,804 @@ const CATS = {
   infra: 'Infrastructure',
   other: 'Other',
 }
-let statusData = {},
-  statsData = {},
-  versionsData = {}
-let logTimer = null,
-  logsReady = false,
-  curLogUnit = ''
 
-// ── Web panel URLs for each service (injected from config) ──
+// ── State ──
+let statusData = {}
+let statsData = {}
+let versionsData = {}
+let logRefreshTimer = null
+let logsInitialized = false
+let currentLogUnit = ''
 
 // ── Tabs ──
-function tab(n, el) {
-  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'))
-  el.classList.add('active')
-  document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'))
-  document.getElementById('p-' + n).classList.add('active')
-  if (n !== 'l' && logTimer) {
-    clearInterval(logTimer)
-    logTimer = null
+function switchTab(tabName, tabElement) {
+  document.querySelectorAll('.tab').forEach((tab) => tab.classList.remove('active'))
+  tabElement.classList.add('active')
+  document.querySelectorAll('.panel').forEach((panel) => panel.classList.remove('active'))
+  document.getElementById('p-' + tabName).classList.add('active')
+  if (tabName !== 'l' && logRefreshTimer) {
+    clearInterval(logRefreshTimer)
+    logRefreshTimer = null
   }
 }
 
-// ── Utils ──
-function esc(s) {
-  return String(s == null ? '—' : s)
+// ── Utility Functions ──
+function escapeHtml(str) {
+  return String(str == null ? '—' : str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
 }
-function fmt(n) {
-  if (n == null || n === undefined) return '—'
-  if (typeof n !== 'number') return esc(String(n))
-  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B'
-  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M'
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
-  return n.toLocaleString()
-}
-function fmtGB(n) {
-  if (n == null) return '—'
-  return n >= 1000 ? (n / 1000).toFixed(1) + ' TB' : n.toFixed(1) + ' GB'
-}
-function kv(k, v, cls = '') {
-  return `<div class="kv ${cls}"><div class="vv">${v === '—' || v == null ? '<span style="color:var(--muted)">—</span>' : esc(String(v))}</div><div class="kk">${esc(k)}</div></div>`
-}
-function row(...items) {
-  return `<div class="srow">${items.filter(Boolean).join('')}</div>`
-}
-function sysR(k, v, cls = '') {
-  return `<div class="sys-r"><span class="sk">${esc(k)}</span><span class="sv ${cls}">${esc(String(v))}</span></div>`
-}
-function sysBar(pct, cls = '') {
-  return `<div class="sys-bar"><div class="sys-bar-fill ${cls}" style="width:${Math.min(Math.max(pct, 0), 100).toFixed(1)}%"></div></div>`
-}
-function fmtRate(bps) {
-  if (!bps) return '0 B/s'
-  if (bps < 1024) return bps.toFixed(0) + ' B/s'
-  if (bps < 1048576) return (bps / 1024).toFixed(1) + ' KB/s'
-  if (bps < 1073741824) return (bps / 1048576).toFixed(1) + ' MB/s'
-  return (bps / 1073741824).toFixed(2) + ' GB/s'
-}
-function fmtBytes(b) {
-  if (!b) return '0 B'
-  if (b < 1024) return b + ' B'
-  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB'
-  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB'
-  return (b / 1073741824).toFixed(2) + ' GB'
+
+function formatNumber(num) {
+  if (num == null || num === undefined) return '—'
+  if (typeof num !== 'number') return escapeHtml(String(num))
+  if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B'
+  if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M'
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
+  return num.toLocaleString()
 }
 
-// ── Version tags ──
-function normVer(v) {
-  return v ? v.replace(/^[vV]/, '').trim() : ''
+function formatGigabytes(num) {
+  if (num == null) return '—'
+  return num >= 1000 ? (num / 1000).toFixed(1) + ' TB' : num.toFixed(1) + ' GB'
 }
-// Split a version string into numeric parts only (e.g. "1.43.0.10492-abc" → [1,43,0,10492])
-function verParts(v) {
-  return normVer(v)
+
+function statCard(label, value, colorClass = '') {
+  const displayValue =
+    value === '—' || value == null ? '<span style="color:var(--muted)">—</span>' : escapeHtml(String(value))
+  return `<div class="kv ${colorClass}"><div class="vv">${displayValue}</div><div class="kk">${escapeHtml(label)}</div></div>`
+}
+
+function statsRow(...items) {
+  return `<div class="srow">${items.filter(Boolean).join('')}</div>`
+}
+
+function systemRow(label, value, colorClass = '') {
+  return `<div class="sys-r"><span class="sk">${escapeHtml(label)}</span><span class="sv ${colorClass}">${escapeHtml(String(value))}</span></div>`
+}
+
+function systemBar(percent, colorClass = '') {
+  const clampedPercent = Math.min(Math.max(percent, 0), 100).toFixed(1)
+  return `<div class="sys-bar"><div class="sys-bar-fill ${colorClass}" style="width:${clampedPercent}%"></div></div>`
+}
+
+function formatDataRate(bytesPerSec) {
+  if (!bytesPerSec) return '0 B/s'
+  if (bytesPerSec < 1024) return bytesPerSec.toFixed(0) + ' B/s'
+  if (bytesPerSec < 1048576) return (bytesPerSec / 1024).toFixed(1) + ' KB/s'
+  if (bytesPerSec < 1073741824) return (bytesPerSec / 1048576).toFixed(1) + ' MB/s'
+  return (bytesPerSec / 1073741824).toFixed(2) + ' GB/s'
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB'
+  return (bytes / 1073741824).toFixed(2) + ' GB'
+}
+
+// ── Version Helpers ──
+function normalizeVersion(version) {
+  return version ? version.replace(/^[vV]/, '').trim() : ''
+}
+
+// Split a version string into numeric parts (e.g. "1.43.0.10492-abc" → [1,43,0,10492])
+function parseVersionParts(version) {
+  return normalizeVersion(version)
     .split(/[.\-+]/)
-    .map((p) => parseInt(p, 10))
-    .filter((n) => !isNaN(n))
+    .map((part) => parseInt(part, 10))
+    .filter((num) => !isNaN(num))
 }
+
 // Returns -1 if a<b, 0 if a==b, 1 if a>b
-function cmpVer(a, b) {
-  const pa = verParts(a),
-    pb = verParts(b)
-  const len = Math.max(pa.length, pb.length)
-  for (let i = 0; i < len; i++) {
-    const x = pa[i] || 0,
-      y = pb[i] || 0
-    if (x < y) return -1
-    if (x > y) return 1
+function compareVersions(versionA, versionB) {
+  const partsA = parseVersionParts(versionA)
+  const partsB = parseVersionParts(versionB)
+  const maxLength = Math.max(partsA.length, partsB.length)
+  for (let i = 0; i < maxLength; i++) {
+    const numA = partsA[i] || 0
+    const numB = partsB[i] || 0
+    if (numA < numB) return -1
+    if (numA > numB) return 1
   }
   return 0
 }
-function renderVersion(sid, installed) {
-  const gv = versionsData[sid]
-  if (!installed && !gv) return ''
-  const ni = normVer(installed),
-    tags = []
-  if (ni) tags.push(`<span class="ver-tag inst" title="Installed">v${esc(ni)}</span>`)
-  if (gv?.latest) {
-    const ng = normVer(gv.latest)
-    const cmp = ni && ng ? cmpVer(ni, ng) : null
-    let cls, arrow, title
-    if (cmp === null) {
-      cls = 'latest'
+
+function renderVersion(serviceId, installed) {
+  const githubVersion = versionsData[serviceId]
+  if (!installed && !githubVersion) return ''
+
+  const normalizedInstalled = normalizeVersion(installed)
+  const tags = []
+
+  if (normalizedInstalled) {
+    tags.push(`<span class="ver-tag inst" title="Installed">v${escapeHtml(normalizedInstalled)}</span>`)
+  }
+
+  if (githubVersion?.latest) {
+    const normalizedGithub = normalizeVersion(githubVersion.latest)
+    const comparison =
+      normalizedInstalled && normalizedGithub ? compareVersions(normalizedInstalled, normalizedGithub) : null
+
+    let cssClass, arrow, title
+    if (comparison === null) {
+      cssClass = 'latest'
       arrow = ''
       title = 'Latest on GitHub'
-    } else if (cmp === 0) {
-      cls = 'uptodate'
+    } else if (comparison === 0) {
+      cssClass = 'uptodate'
       arrow = ''
       title = 'Up to date'
-    } else if (cmp < 0) {
-      cls = 'outdated'
+    } else if (comparison < 0) {
+      cssClass = 'outdated'
       arrow = '↑ '
       title = 'Update available'
     } else {
-      cls = 'uptodate'
+      cssClass = 'uptodate'
       arrow = ''
       title = 'Installed is newer than latest release'
     }
-    tags.push(`<span class="ver-tag ${cls}" title="${title}">${arrow}${esc(gv.latest)}</span>`)
+
+    tags.push(`<span class="ver-tag ${cssClass}" title="${title}">${arrow}${escapeHtml(githubVersion.latest)}</span>`)
   }
+
   return tags.length ? `<div class="ver-row">${tags.join('')}</div>` : ''
 }
 
-// ── System card ──
-function renderSystem(s) {
-  if (!s || !Object.keys(s).length)
+// ── System Card ──
+function renderSystem(systemStats) {
+  if (!systemStats || !Object.keys(systemStats).length) {
     return '<div style="color:var(--muted);font-size:.78rem;padding:.3rem">Collecting system stats…</div>'
-  let h = '<div class="sys-panels">'
+  }
+
+  let html = '<div class="sys-panels">'
+
   // OS + uptime
-  h += '<div class="sys-sec"><div class="sys-ttl">System</div>'
-  if (s.os_distro) h += sysR('OS', s.os_distro)
-  if (s.uptime) h += sysR('Uptime', s.uptime, 'ok')
-  if (s.process_count != null) h += sysR('Processes', s.process_count)
-  h += '</div>'
+  html += '<div class="sys-sec"><div class="sys-ttl">System</div>'
+  if (systemStats.os_distro) html += systemRow('OS', systemStats.os_distro)
+  if (systemStats.uptime) html += systemRow('Uptime', systemStats.uptime, 'ok')
+  if (systemStats.process_count != null) html += systemRow('Processes', systemStats.process_count)
+  html += '</div>'
+
   // CPU
-  const cpu = s.cpu || {}
+  const cpu = systemStats.cpu || {}
   if (Object.keys(cpu).length) {
-    h += '<div class="sys-sec"><div class="sys-ttl">CPU</div>'
-    if (cpu.model)
-      h += `<div style="font-size:.62rem;color:var(--muted2);margin-bottom:.25rem;line-height:1.3">${esc(cpu.model)}</div>`
-    if (cpu.physical_cores != null) h += sysR('Cores / Threads', `${cpu.physical_cores} / ${cpu.logical_cores}`)
-    if (cpu.freq_mhz) h += sysR('Clock', `${cpu.freq_mhz} MHz`)
-    if (cpu.usage_pct != null) {
-      const c = cpu.usage_pct > 80 ? 'err' : cpu.usage_pct > 50 ? 'warn' : 'ok'
-      h += sysR('Usage', `${cpu.usage_pct.toFixed(1)}%`, c)
-      h += sysBar(cpu.usage_pct, c)
+    html += '<div class="sys-sec"><div class="sys-ttl">CPU</div>'
+    if (cpu.model) {
+      html += `<div style="font-size:.62rem;color:var(--muted2);margin-bottom:.25rem;line-height:1.3">${escapeHtml(cpu.model)}</div>`
     }
-    if (cpu.load_1m != null) h += sysR('Load (1/5/15m)', `${cpu.load_1m} / ${cpu.load_5m} / ${cpu.load_15m}`)
+    if (cpu.physical_cores != null) {
+      html += systemRow('Cores / Threads', `${cpu.physical_cores} / ${cpu.logical_cores}`)
+    }
+    if (cpu.freq_mhz) html += systemRow('Clock', `${cpu.freq_mhz} MHz`)
+    if (cpu.usage_pct != null) {
+      const cpuColor = cpu.usage_pct > 80 ? 'err' : cpu.usage_pct > 50 ? 'warn' : 'ok'
+      html += systemRow('Usage', `${cpu.usage_pct.toFixed(1)}%`, cpuColor)
+      html += systemBar(cpu.usage_pct, cpuColor)
+    }
+    if (cpu.load_1m != null) {
+      html += systemRow('Load (1/5/15m)', `${cpu.load_1m} / ${cpu.load_5m} / ${cpu.load_15m}`)
+    }
+
     // CPU temps from hwmon
-    const temps = s.temps || {}
+    const temps = systemStats.temps || {}
     if (temps.cpu != null) {
-      const tc = temps.cpu > 80 ? 'err' : temps.cpu > 60 ? 'warn' : 'ok'
-      h += sysR('Temp', `${temps.cpu}°C`, tc)
+      const tempColor = temps.cpu > 80 ? 'err' : temps.cpu > 60 ? 'warn' : 'ok'
+      html += systemRow('Temp', `${temps.cpu}°C`, tempColor)
       if (temps.cores && temps.cores.length > 1) {
-        const coreStr = temps.cores
-          .map((t) => {
-            const cc = t > 80 ? 'var(--err)' : t > 60 ? 'var(--warn)' : 'var(--ok)'
-            return `<span style="color:${cc}">${t}°</span>`
+        const coreTempsHtml = temps.cores
+          .map((temp) => {
+            const color = temp > 80 ? 'var(--err)' : temp > 60 ? 'var(--warn)' : 'var(--ok)'
+            return `<span style="color:${color}">${temp}°</span>`
           })
           .join(' ')
-        h += `<div style="font-size:.58rem;color:var(--muted2);margin:-.1rem 0 .15rem;line-height:1.4">Cores: ${coreStr}</div>`
+        html += `<div style="font-size:.58rem;color:var(--muted2);margin:-.1rem 0 .15rem;line-height:1.4">Cores: ${coreTempsHtml}</div>`
       }
     }
+
     // CPU fan RPM from psutil sensors
-    const fans = (s.sensors && s.sensors.fans) || []
+    const fans = (systemStats.sensors && systemStats.sensors.fans) || []
     if (fans.length) {
       const cpuFan =
-        fans.find((f) => f.source === 'nct6793' || f.source === 'thinkpad' || f.source === 'dell_smm') || fans[0]
-      if (cpuFan) h += sysR('Fan', `${cpuFan.rpm} RPM`)
+        fans.find((fan) => fan.source === 'nct6793' || fan.source === 'thinkpad' || fan.source === 'dell_smm') ||
+        fans[0]
+      if (cpuFan) html += systemRow('Fan', `${cpuFan.rpm} RPM`)
     }
-    h += '</div>'
+    html += '</div>'
   }
+
   // RAM
-  const ram = s.ram || {}
+  const ram = systemStats.ram || {}
   if (Object.keys(ram).length) {
-    h += '<div class="sys-sec"><div class="sys-ttl">Memory</div>'
-    const rc = ram.percent > 90 ? 'err' : ram.percent > 70 ? 'warn' : 'ok'
-    h += sysR('Used / Total', `${ram.used_gb} / ${ram.total_gb} GB`)
-    h += sysBar(ram.percent, rc)
-    h += sysR('Available', `${ram.available_gb} GB`, 'ok')
-    if (s.swap?.total_gb > 0) {
-      const sc = s.swap.percent > 80 ? 'warn' : ''
-      h += sysR('Swap', `${s.swap.used_gb} / ${s.swap.total_gb} GB`)
-      if (s.swap.percent > 0) h += sysBar(s.swap.percent, sc)
+    html += '<div class="sys-sec"><div class="sys-ttl">Memory</div>'
+    const ramColor = ram.percent > 90 ? 'err' : ram.percent > 70 ? 'warn' : 'ok'
+    html += systemRow('Used / Total', `${ram.used_gb} / ${ram.total_gb} GB`)
+    html += systemBar(ram.percent, ramColor)
+    html += systemRow('Available', `${ram.available_gb} GB`, 'ok')
+    if (systemStats.swap?.total_gb > 0) {
+      const swapColor = systemStats.swap.percent > 80 ? 'warn' : ''
+      html += systemRow('Swap', `${systemStats.swap.used_gb} / ${systemStats.swap.total_gb} GB`)
+      if (systemStats.swap.percent > 0) html += systemBar(systemStats.swap.percent, swapColor)
     }
-    h += '</div>'
+    html += '</div>'
   }
+
   // GPU
-  const gpu = s.gpu || {}
+  const gpu = systemStats.gpu || {}
   if (Object.keys(gpu).length) {
-    h += '<div class="sys-sec"><div class="sys-ttl">GPU</div>'
-    if (gpu.name) h += `<div style="font-size:.62rem;color:var(--muted2);margin-bottom:.25rem">${esc(gpu.name)}</div>`
+    html += '<div class="sys-sec"><div class="sys-ttl">GPU</div>'
+    if (gpu.name) {
+      html += `<div style="font-size:.62rem;color:var(--muted2);margin-bottom:.25rem">${escapeHtml(gpu.name)}</div>`
+    }
     if (gpu.usage_pct != null) {
-      const gc = gpu.usage_pct > 80 ? 'warn' : gpu.usage_pct > 0 ? 'ok' : ''
-      h += sysR('Usage', `${gpu.usage_pct}%`, gc)
-      h += sysBar(gpu.usage_pct, gc)
+      const gpuColor = gpu.usage_pct > 80 ? 'warn' : gpu.usage_pct > 0 ? 'ok' : ''
+      html += systemRow('Usage', `${gpu.usage_pct}%`, gpuColor)
+      html += systemBar(gpu.usage_pct, gpuColor)
     }
     if (gpu.vram_used_mb != null && gpu.vram_total_mb) {
-      const vp = (gpu.vram_used_mb / gpu.vram_total_mb) * 100
-      const vc = vp > 90 ? 'err' : vp > 70 ? 'warn' : 'ok'
-      h += sysR('VRAM', `${gpu.vram_used_mb} / ${gpu.vram_total_mb} MB`, vc)
-      h += sysBar(vp, vc)
+      const vramPercent = (gpu.vram_used_mb / gpu.vram_total_mb) * 100
+      const vramColor = vramPercent > 90 ? 'err' : vramPercent > 70 ? 'warn' : 'ok'
+      html += systemRow('VRAM', `${gpu.vram_used_mb} / ${gpu.vram_total_mb} MB`, vramColor)
+      html += systemBar(vramPercent, vramColor)
     }
     if (gpu.temp_c != null) {
-      const tc = gpu.temp_c > 85 ? 'err' : gpu.temp_c > 70 ? 'warn' : 'ok'
-      h += sysR('Temp', `${gpu.temp_c}°C`, tc)
+      const gpuTempColor = gpu.temp_c > 85 ? 'err' : gpu.temp_c > 70 ? 'warn' : 'ok'
+      html += systemRow('Temp', `${gpu.temp_c}°C`, gpuTempColor)
     }
-    if (gpu.power_w != null) h += sysR('Power', `${gpu.power_w} W`)
-    if (gpu.core_mhz != null) h += sysR('Core / Mem MHz', `${gpu.core_mhz} / ${gpu.mem_mhz || '?'}`)
-    if (gpu.fan_rpm != null) h += sysR('Fan', `${gpu.fan_rpm} RPM`)
-    if (gpu.mem_busy_pct != null) h += sysR('Mem busy', `${gpu.mem_busy_pct}%`)
-    h += '</div>'
+    if (gpu.power_w != null) html += systemRow('Power', `${gpu.power_w} W`)
+    if (gpu.core_mhz != null) html += systemRow('Core / Mem MHz', `${gpu.core_mhz} / ${gpu.mem_mhz || '?'}`)
+    if (gpu.fan_rpm != null) html += systemRow('Fan', `${gpu.fan_rpm} RPM`)
+    if (gpu.mem_busy_pct != null) html += systemRow('Mem busy', `${gpu.mem_busy_pct}%`)
+    html += '</div>'
   }
+
   // Disks
-  const disks = s.disks || []
+  const disks = systemStats.disks || []
   if (disks.length) {
-    h += '<div class="sys-sec"><div class="sys-ttl">Storage</div>'
-    for (const d of disks) {
-      const dc = d.percent > 90 ? 'err' : d.percent > 75 ? 'warn' : 'ok'
-      h += `<div class="disk-item">`
-      h += `<div class="disk-lbl"><span>${esc(d.mount)}</span><span style="color:var(--${d.percent > 90 ? 'err' : d.percent > 75 ? 'warn' : 'muted'})">${d.free} / ${d.total} ${d.unit}</span></div>`
-      h += `<div class="dbar"><div class="dbar-f ${dc}" style="width:${d.percent}%"></div></div></div>`
+    html += '<div class="sys-sec"><div class="sys-ttl">Storage</div>'
+    for (const disk of disks) {
+      const diskColor = disk.percent > 90 ? 'err' : disk.percent > 75 ? 'warn' : 'ok'
+      const freeColor = disk.percent > 90 ? 'err' : disk.percent > 75 ? 'warn' : 'muted'
+      html += `<div class="disk-item">`
+      html += `<div class="disk-lbl"><span>${escapeHtml(disk.mount)}</span><span style="color:var(--${freeColor})">${disk.free} / ${disk.total} ${disk.unit}</span></div>`
+      html += `<div class="dbar"><div class="dbar-f ${diskColor}" style="width:${disk.percent}%"></div></div></div>`
     }
-    h += '</div>'
+    html += '</div>'
   }
+
   // Disk I/O
-  const dio = s.disk_io || {}
-  if (dio.read_rate || dio.write_rate) {
-    h += '<div class="sys-sec"><div class="sys-ttl">Disk I/O</div>'
-    h += sysR('Read', dio.read_rate || '—', 'ok')
-    h += sysR('Write', dio.write_rate || '—', 'warn')
-    h += sysR('Session ↑↓', `${dio.read_total_gb || 0} / ${dio.write_total_gb || 0} GB`)
-    h += '</div>'
+  const diskIo = systemStats.disk_io || {}
+  if (diskIo.read_rate || diskIo.write_rate) {
+    html += '<div class="sys-sec"><div class="sys-ttl">Disk I/O</div>'
+    html += systemRow('Read', diskIo.read_rate || '—', 'ok')
+    html += systemRow('Write', diskIo.write_rate || '—', 'warn')
+    html += systemRow('Session ↑↓', `${diskIo.read_total_gb || 0} / ${diskIo.write_total_gb || 0} GB`)
+    html += '</div>'
   }
+
   // Network I/O
-  const nio = s.net_io || {}
-  if (nio.recv_rate || nio.sent_rate) {
-    const cap = nio.link_rate || ''
-    h += '<div class="sys-sec"><div class="sys-ttl">Network</div>'
-    const rp = nio.recv_pct || 0,
-      sp = nio.sent_pct || 0
-    const rc = rp > 80 ? 'err' : rp > 50 ? 'warn' : 'ok',
-      sc = sp > 80 ? 'err' : sp > 50 ? 'warn' : 'ok'
-    h += sysR('↓ Recv', cap ? `${esc(nio.recv_rate)} / ${esc(cap)}` : esc(nio.recv_rate || '—'), rc)
-    if (rp > 0)
-      h += `<div class="dbar" style="margin:.05rem 0 .2rem"><div class="dbar-f ${rc}" style="width:${Math.min(rp, 100)}%"></div></div>`
-    h += sysR('↑ Sent', cap ? `${esc(nio.sent_rate)} / ${esc(cap)}` : esc(nio.sent_rate || '—'), sc)
-    if (sp > 0)
-      h += `<div class="dbar" style="margin:.05rem 0 .2rem"><div class="dbar-f ${sc}" style="width:${Math.min(sp, 100)}%"></div></div>`
-    h += sysR('Total ↓', `${nio.recv_total_gb || 0} GB`)
-    h += sysR('Total ↑', `${nio.sent_total_gb || 0} GB`)
-    h += '</div>'
+  const netIo = systemStats.net_io || {}
+  if (netIo.recv_rate || netIo.sent_rate) {
+    const linkCapacity = netIo.link_rate || ''
+    html += '<div class="sys-sec"><div class="sys-ttl">Network</div>'
+    const recvPercent = netIo.recv_pct || 0
+    const sentPercent = netIo.sent_pct || 0
+    const recvColor = recvPercent > 80 ? 'err' : recvPercent > 50 ? 'warn' : 'ok'
+    const sentColor = sentPercent > 80 ? 'err' : sentPercent > 50 ? 'warn' : 'ok'
+    html += systemRow(
+      '↓ Recv',
+      linkCapacity
+        ? `${escapeHtml(netIo.recv_rate)} / ${escapeHtml(linkCapacity)}`
+        : escapeHtml(netIo.recv_rate || '—'),
+      recvColor,
+    )
+    if (recvPercent > 0) {
+      html += `<div class="dbar" style="margin:.05rem 0 .2rem"><div class="dbar-f ${recvColor}" style="width:${Math.min(recvPercent, 100)}%"></div></div>`
+    }
+    html += systemRow(
+      '↑ Sent',
+      linkCapacity
+        ? `${escapeHtml(netIo.sent_rate)} / ${escapeHtml(linkCapacity)}`
+        : escapeHtml(netIo.sent_rate || '—'),
+      sentColor,
+    )
+    if (sentPercent > 0) {
+      html += `<div class="dbar" style="margin:.05rem 0 .2rem"><div class="dbar-f ${sentColor}" style="width:${Math.min(sentPercent, 100)}%"></div></div>`
+    }
+    html += systemRow('Total ↓', `${netIo.recv_total_gb || 0} GB`)
+    html += systemRow('Total ↑', `${netIo.sent_total_gb || 0} GB`)
+    html += '</div>'
   }
-  h += '</div>'
-  return h
+
+  html += '</div>'
+  return html
 }
 
-// ── Stats renderers ──
-function renderStats(sid, s) {
-  if (!s || !Object.keys(s).length) return ''
-  if (sid === 'system') return `<div class="sbox">${renderSystem(s)}</div>`
-  const r = {
+// ── Stats Renderers ──
+function renderStats(serviceId, stats) {
+  if (!stats || !Object.keys(stats).length) return ''
+  if (serviceId === 'system') return `<div class="sbox">${renderSystem(stats)}</div>`
+
+  const renderers = {
     comet: () => {
-      let h = row(
-        kv('version', s.version, 'blue'),
-        kv('types', s.types?.length),
-        s.active_connections ? kv('conns', s.active_connections, 'ok') : '',
+      let html = statsRow(
+        statCard('version', stats.version, 'blue'),
+        statCard('types', stats.types?.length),
+        stats.active_connections ? statCard('conns', stats.active_connections, 'ok') : '',
       )
-      if (s.torrents_total)
-        h += row(
-          kv('torrents', fmt(s.torrents_total), 'blue'),
-          kv('queue🎬', s.queue_movies),
-          kv('queue📺', s.queue_series),
+      if (stats.torrents_total) {
+        html += statsRow(
+          statCard('torrents', formatNumber(stats.torrents_total), 'blue'),
+          statCard('queue🎬', stats.queue_movies),
+          statCard('queue📺', stats.queue_series),
         )
-      if (s.scraper_running != null)
-        h += row(
-          kv(
+      }
+      if (stats.scraper_running != null) {
+        html += statsRow(
+          statCard(
             'scraper',
-            s.scraper_running ? (s.scraper_paused ? 'paused' : 'running') : 'stopped',
-            s.scraper_running ? 'ok' : 'warn',
+            stats.scraper_running ? (stats.scraper_paused ? 'paused' : 'running') : 'stopped',
+            stats.scraper_running ? 'ok' : 'warn',
           ),
-          kv('24h found', fmt(s.slo_torrents_found), 'blue'),
-          kv(
+          statCard('24h found', formatNumber(stats.slo_torrents_found), 'blue'),
+          statCard(
             'fail rate',
-            s.slo_fail_rate != null ? `${(s.slo_fail_rate * 100).toFixed(0)}%` : '—',
-            s.slo_fail_rate > 0.1 ? 'warn' : '',
+            stats.slo_fail_rate != null ? `${(stats.slo_fail_rate * 100).toFixed(0)}%` : '—',
+            stats.slo_fail_rate > 0.1 ? 'warn' : '',
           ),
         )
-      if (s.top_trackers?.length)
-        h += `<div style="font-size:.62rem;color:var(--muted);margin-top:.2rem">${s.top_trackers
+      }
+      if (stats.top_trackers?.length) {
+        html += `<div style="font-size:.62rem;color:var(--muted);margin-top:.2rem">${stats.top_trackers
           .slice(0, 3)
-          .map((t) => esc(t.name) + ': ' + fmt(t.count))
+          .map((tracker) => escapeHtml(tracker.name) + ': ' + formatNumber(tracker.count))
           .join(' · ')}</div>`
-      return h
+      }
+      return html
     },
+
     mediafusion: () => {
-      let h = row(
-        kv('version', s.version || s.addon_version, 'blue'),
-        kv('access', s.is_public ? 'public' : 'private', s.is_public ? 'ok' : ''),
+      let html = statsRow(
+        statCard('version', stats.version || stats.addon_version, 'blue'),
+        statCard('access', stats.is_public ? 'public' : 'private', stats.is_public ? 'ok' : ''),
       )
-      if (s.streams_total != null)
-        h += row(
-          kv('streams', fmt(s.streams_total), 'blue'),
-          s.movies ? kv('movies', fmt(s.movies)) : '',
-          s.series ? kv('series', fmt(s.series)) : '',
+      if (stats.streams_total != null) {
+        html += statsRow(
+          statCard('streams', formatNumber(stats.streams_total), 'blue'),
+          stats.movies ? statCard('movies', formatNumber(stats.movies)) : '',
+          stats.series ? statCard('series', formatNumber(stats.series)) : '',
         )
-      if (s.sched_total != null)
-        h += row(
-          kv('schedulers', s.sched_active + '/' + s.sched_total),
-          s.scrapers_active ? kv('scrapers', s.scrapers_active + '/' + s.scrapers_total, 'ok') : '',
-          s.sched_running > 0 ? kv('running', s.sched_running, 'ok') : kv('idle', '0'),
+      }
+      if (stats.sched_total != null) {
+        html += statsRow(
+          statCard('schedulers', stats.sched_active + '/' + stats.sched_total),
+          stats.scrapers_active ? statCard('scrapers', stats.scrapers_active + '/' + stats.scrapers_total, 'ok') : '',
+          stats.sched_running > 0 ? statCard('running', stats.sched_running, 'ok') : statCard('idle', '0'),
         )
-      if (s.top_sources) {
-        const src = Object.entries(s.top_sources)
-        h += row(...src.slice(0, 3).map(([k, v]) => kv(k, fmt(v))))
       }
-      if (s.debrid_cached) {
-        const dc = Object.entries(s.debrid_cached)
-        if (dc.length) h += row(...dc.map(([k, v]) => kv(k + ' cache', fmt(v), 'ok')))
+      if (stats.top_sources) {
+        const sources = Object.entries(stats.top_sources)
+        html += statsRow(...sources.slice(0, 3).map(([key, value]) => statCard(key, formatNumber(value))))
       }
-      if (s.redis_mem)
-        h += `<div style="font-size:.62rem;color:var(--muted);margin-top:.15rem">Redis: ${esc(s.redis_mem)} | DB: ${esc(s.db_size || '?')}</div>`
-      return h
+      if (stats.debrid_cached) {
+        const debridEntries = Object.entries(stats.debrid_cached)
+        if (debridEntries.length) {
+          html += statsRow(...debridEntries.map(([key, value]) => statCard(key + ' cache', formatNumber(value), 'ok')))
+        }
+      }
+      if (stats.redis_mem) {
+        html += `<div style="font-size:.62rem;color:var(--muted);margin-top:.15rem">Redis: ${escapeHtml(stats.redis_mem)} | DB: ${escapeHtml(stats.db_size || '?')}</div>`
+      }
+      return html
     },
+
     stremthru: () => {
-      let h = row(
-        kv('version', s.version, 'blue'),
-        kv('status', s.status, 'ok'),
-        s.store_name ? kv('store', s.store_name) : '',
+      let html = statsRow(
+        statCard('version', stats.version, 'blue'),
+        statCard('status', stats.status, 'ok'),
+        stats.store_name ? statCard('store', stats.store_name) : '',
       )
-      if (s.subscription) h += row(kv('sub', s.subscription, s.subscription?.includes('premium') ? 'ok' : 'warn'))
-      if (s.magnet_total != null)
-        h += row(
-          kv('magnets', fmt(s.magnet_total), 'blue'),
-          s.torrent_info_count ? kv('torrents', fmt(s.torrent_info_count)) : '',
-          s.dmm_hashes ? kv('dmm', fmt(s.dmm_hashes)) : '',
-        )
-      if (s.magnet_cache) {
-        const mc = s.magnet_cache
-        const stores = Object.keys(mc)
-        if (stores.length) h += row(...stores.map((st) => kv(st, fmt(mc[st].cached) + ' cached', 'ok')))
+      if (stats.subscription) {
+        html += statsRow(statCard('sub', stats.subscription, stats.subscription?.includes('premium') ? 'ok' : 'warn'))
       }
-      if (s.db_size) h += row(kv('db', s.db_size))
-      return h
+      if (stats.magnet_total != null) {
+        html += statsRow(
+          statCard('magnets', formatNumber(stats.magnet_total), 'blue'),
+          stats.torrent_info_count ? statCard('torrents', formatNumber(stats.torrent_info_count)) : '',
+          stats.dmm_hashes ? statCard('dmm', formatNumber(stats.dmm_hashes)) : '',
+        )
+      }
+      if (stats.magnet_cache) {
+        const magnetCache = stats.magnet_cache
+        const stores = Object.keys(magnetCache)
+        if (stores.length) {
+          html += statsRow(
+            ...stores.map((store) => statCard(store, formatNumber(magnetCache[store].cached) + ' cached', 'ok')),
+          )
+        }
+      }
+      if (stats.db_size) html += statsRow(statCard('db', stats.db_size))
+      return html
     },
+
     zilean: () => {
-      if (!s.responding) return ''
-      let h = row(
-        kv('status', 'online', 'ok'),
-        s.sample_results != null ? kv('sample hits', s.sample_results, 'blue') : '',
-        s.quality_distribution
-          ? kv(
+      if (!stats.responding) return ''
+      let html = statsRow(
+        statCard('status', 'online', 'ok'),
+        stats.sample_results != null ? statCard('sample hits', stats.sample_results, 'blue') : '',
+        stats.quality_distribution
+          ? statCard(
               'qualities',
-              Object.entries(s.quality_distribution)
-                .map(([k, v]) => k + '(' + fmt(v) + ')')
+              Object.entries(stats.quality_distribution)
+                .map(([key, value]) => key + '(' + formatNumber(value) + ')')
                 .join(' '),
             )
           : '',
       )
-      if (s.total_torrents != null)
-        h += row(
-          kv('torrents', fmt(s.total_torrents), 'blue'),
-          kv('w/ IMDB', fmt(s.with_imdb), 'ok'),
-          kv('unmatched', fmt(s.total_torrents - s.with_imdb), 'warn'),
+      if (stats.total_torrents != null) {
+        html += statsRow(
+          statCard('torrents', formatNumber(stats.total_torrents), 'blue'),
+          statCard('w/ IMDB', formatNumber(stats.with_imdb), 'ok'),
+          statCard('unmatched', formatNumber(stats.total_torrents - stats.with_imdb), 'warn'),
         )
-      if (s.scraper_running != null)
-        h += row(
-          kv('scraper', s.scraper_running ? 'running' : 'idle', s.scraper_running ? 'ok' : ''),
-          s.dmm_status != null ? kv('dmm sync', s.dmm_status, s.dmm_status === 'ok' ? 'ok' : 'err') : '',
-          s.imdb_entries ? kv('imdb titles', fmt(s.imdb_entries)) : '',
+      }
+      if (stats.scraper_running != null) {
+        html += statsRow(
+          statCard('scraper', stats.scraper_running ? 'running' : 'idle', stats.scraper_running ? 'ok' : ''),
+          stats.dmm_status != null
+            ? statCard('dmm sync', stats.dmm_status, stats.dmm_status === 'ok' ? 'ok' : 'err')
+            : '',
+          stats.imdb_entries ? statCard('imdb titles', formatNumber(stats.imdb_entries)) : '',
         )
-      if (s.dmm_last_run)
-        h += `<div style="font-size:.62rem;color:var(--muted);margin-top:.15rem">DMM sync: ${esc(s.dmm_last_run)}</div>`
-      if (s.db_size) h += `<div style="font-size:.62rem;color:var(--muted)">DB: ${esc(s.db_size)}</div>`
-      if (s.latest_indexed)
-        h += `<div style="font-size:.62rem;color:var(--muted)">Last indexed: ${esc(s.latest_indexed)}</div>`
-      return h
+      }
+      if (stats.dmm_last_run) {
+        html += `<div style="font-size:.62rem;color:var(--muted);margin-top:.15rem">DMM sync: ${escapeHtml(stats.dmm_last_run)}</div>`
+      }
+      if (stats.db_size) {
+        html += `<div style="font-size:.62rem;color:var(--muted)">DB: ${escapeHtml(stats.db_size)}</div>`
+      }
+      if (stats.latest_indexed) {
+        html += `<div style="font-size:.62rem;color:var(--muted)">Last indexed: ${escapeHtml(stats.latest_indexed)}</div>`
+      }
+      return html
     },
+
     aiostreams: () => {
-      let h = row(
-        kv('status', 'online', 'ok'),
-        kv('version', s.version, 'blue'),
-        s.channel ? kv('channel', s.channel, s.channel === 'stable' ? 'ok' : 'warn') : '',
+      let html = statsRow(
+        statCard('status', 'online', 'ok'),
+        statCard('version', stats.version, 'blue'),
+        stats.channel ? statCard('channel', stats.channel, stats.channel === 'stable' ? 'ok' : 'warn') : '',
       )
-      if (s.user_count != null)
-        h += row(
-          kv('users', s.user_count),
-          s.catalogs ? kv('catalogs', s.catalogs) : '',
-          s.presets_available ? kv('presets', s.presets_available) : '',
+      if (stats.user_count != null) {
+        html += statsRow(
+          statCard('users', stats.user_count),
+          stats.catalogs ? statCard('catalogs', stats.catalogs) : '',
+          stats.presets_available ? statCard('presets', stats.presets_available) : '',
         )
-      if (s.forced_services?.length) h += row(kv('services', s.forced_services.join(', ')))
-      if (s.cache_entries != null)
-        h += row(
-          kv('cache', fmt(s.cache_entries)),
-          s.max_addons ? kv('max addons', s.max_addons) : '',
-          s.tmdb_available ? kv('tmdb', 'yes', 'ok') : kv('tmdb', 'no', 'warn'),
+      }
+      if (stats.forced_services?.length) {
+        html += statsRow(statCard('services', stats.forced_services.join(', ')))
+      }
+      if (stats.cache_entries != null) {
+        html += statsRow(
+          statCard('cache', formatNumber(stats.cache_entries)),
+          stats.max_addons ? statCard('max addons', stats.max_addons) : '',
+          stats.tmdb_available ? statCard('tmdb', 'yes', 'ok') : statCard('tmdb', 'no', 'warn'),
         )
-      if (s.commit)
-        h += `<div style="font-size:.62rem;color:var(--muted);margin-top:.15rem">Commit: ${esc(s.commit)} | ${esc(s.tag || '')}</div>`
-      return h
+      }
+      if (stats.commit) {
+        html += `<div style="font-size:.62rem;color:var(--muted);margin-top:.15rem">Commit: ${escapeHtml(stats.commit)} | ${escapeHtml(stats.tag || '')}</div>`
+      }
+      return html
     },
+
     flaresolverr: () =>
-      row(kv('status', s.status, s.status === 'ok' ? 'ok' : 'warn'), s.version ? kv('version', s.version, 'blue') : ''),
-    byparr: () =>
-      row(
-        kv('status', s.status, s.status === 'ok' ? 'ok' : 'warn'),
-        s.browser ? kv('browser', s.browser) : '',
-        s.version ? kv('version', s.version, 'blue') : '',
+      statsRow(
+        statCard('status', stats.status, stats.status === 'ok' ? 'ok' : 'warn'),
+        stats.version ? statCard('version', stats.version, 'blue') : '',
       ),
+
+    byparr: () =>
+      statsRow(
+        statCard('status', stats.status, stats.status === 'ok' ? 'ok' : 'warn'),
+        stats.browser ? statCard('browser', stats.browser) : '',
+        stats.version ? statCard('version', stats.version, 'blue') : '',
+      ),
+
     jackett: () => {
-      const p = []
-      if (s.indexers_configured != null) p.push(kv('indexers', s.indexers_configured))
-      if (s.responding) p.push(kv('torznab', 'ok', 'ok'))
-      return p.length ? row(...p) : ''
+      const items = []
+      if (stats.indexers_configured != null) items.push(statCard('indexers', stats.indexers_configured))
+      if (stats.responding) items.push(statCard('torznab', 'ok', 'ok'))
+      return items.length ? statsRow(...items) : ''
     },
+
     prowlarr: () =>
       [
-        row(
-          kv('indexers', s.indexers_total),
-          kv('enabled', s.indexers_enabled, 'ok'),
-          kv('queries', fmt(s.total_queries), 'blue'),
-          kv('grabs', fmt(s.total_grabs)),
+        statsRow(
+          statCard('indexers', stats.indexers_total),
+          statCard('enabled', stats.indexers_enabled, 'ok'),
+          statCard('queries', formatNumber(stats.total_queries), 'blue'),
+          statCard('grabs', formatNumber(stats.total_grabs)),
         ),
-        s.total_failed_queries ? row(kv('failed q.', fmt(s.total_failed_queries), 'warn')) : '',
-        s.health_errors || s.health_warnings
-          ? row(
-              s.health_errors ? kv('errors', s.health_errors, 'err') : '',
-              s.health_warnings ? kv('warnings', s.health_warnings, 'warn') : '',
+        stats.total_failed_queries
+          ? statsRow(statCard('failed q.', formatNumber(stats.total_failed_queries), 'warn'))
+          : '',
+        stats.health_errors || stats.health_warnings
+          ? statsRow(
+              stats.health_errors ? statCard('errors', stats.health_errors, 'err') : '',
+              stats.health_warnings ? statCard('warnings', stats.health_warnings, 'warn') : '',
             )
           : '',
-        s.health_messages?.length ? `<div class="health-err">${s.health_messages.map(esc).join(' · ')}</div>` : '',
+        stats.health_messages?.length
+          ? `<div class="health-err">${stats.health_messages.map(escapeHtml).join(' · ')}</div>`
+          : '',
       ].join(''),
+
     radarr: () =>
       [
-        row(
-          kv('total', fmt(s.total)),
-          kv('downloaded', fmt(s.downloaded), 'ok'),
-          kv('missing', fmt(s.missing), s.missing > 0 ? 'err' : ''),
-          kv('queue', fmt(s.queue), s.queue > 0 ? 'warn' : ''),
+        statsRow(
+          statCard('total', formatNumber(stats.total)),
+          statCard('downloaded', formatNumber(stats.downloaded), 'ok'),
+          statCard('missing', formatNumber(stats.missing), stats.missing > 0 ? 'err' : ''),
+          statCard('queue', formatNumber(stats.queue), stats.queue > 0 ? 'warn' : ''),
         ),
-        s.disk_free_gb != null ? row(kv('free disk', fmtGB(s.disk_free_gb)), kv('total', fmtGB(s.disk_total_gb))) : '',
-        s.health_errors || s.health_warnings
-          ? row(
-              s.health_errors ? kv('h.errors', s.health_errors, 'err') : '',
-              s.health_warnings ? kv('h.warnings', s.health_warnings, 'warn') : '',
+        stats.disk_free_gb != null
+          ? statsRow(
+              statCard('free disk', formatGigabytes(stats.disk_free_gb)),
+              statCard('total', formatGigabytes(stats.disk_total_gb)),
             )
           : '',
-        s.health_messages?.length ? `<div class="health-err">${s.health_messages.map(esc).join('<br>')}</div>` : '',
+        stats.health_errors || stats.health_warnings
+          ? statsRow(
+              stats.health_errors ? statCard('h.errors', stats.health_errors, 'err') : '',
+              stats.health_warnings ? statCard('h.warnings', stats.health_warnings, 'warn') : '',
+            )
+          : '',
+        stats.health_messages?.length
+          ? `<div class="health-err">${stats.health_messages.map(escapeHtml).join('<br>')}</div>`
+          : '',
       ].join(''),
+
     sonarr: () =>
       [
-        row(
-          kv('series', fmt(s.total)),
-          kv('episodes', fmt(s.episodes_downloaded), 'ok'),
-          kv('missing ep.', fmt(s.missing_episodes), s.missing_episodes > 0 ? 'warn' : ''),
-          kv('queue', fmt(s.queue), s.queue > 0 ? 'warn' : ''),
+        statsRow(
+          statCard('series', formatNumber(stats.total)),
+          statCard('episodes', formatNumber(stats.episodes_downloaded), 'ok'),
+          statCard('missing ep.', formatNumber(stats.missing_episodes), stats.missing_episodes > 0 ? 'warn' : ''),
+          statCard('queue', formatNumber(stats.queue), stats.queue > 0 ? 'warn' : ''),
         ),
-        s.disk_free_gb != null ? row(kv('free disk', fmtGB(s.disk_free_gb)), kv('total', fmtGB(s.disk_total_gb))) : '',
-        s.health_errors || s.health_warnings
-          ? row(
-              s.health_errors ? kv('h.errors', s.health_errors, 'err') : '',
-              s.health_warnings ? kv('h.warnings', s.health_warnings, 'warn') : '',
+        stats.disk_free_gb != null
+          ? statsRow(
+              statCard('free disk', formatGigabytes(stats.disk_free_gb)),
+              statCard('total', formatGigabytes(stats.disk_total_gb)),
             )
           : '',
-        s.health_messages?.length ? `<div class="health-err">${s.health_messages.map(esc).join('<br>')}</div>` : '',
+        stats.health_errors || stats.health_warnings
+          ? statsRow(
+              stats.health_errors ? statCard('h.errors', stats.health_errors, 'err') : '',
+              stats.health_warnings ? statCard('h.warnings', stats.health_warnings, 'warn') : '',
+            )
+          : '',
+        stats.health_messages?.length
+          ? `<div class="health-err">${stats.health_messages.map(escapeHtml).join('<br>')}</div>`
+          : '',
       ].join(''),
+
     lidarr: () =>
       [
-        row(
-          kv('artists', fmt(s.artists)),
-          kv('albums', fmt(s.albums_total)),
-          kv('tracks', fmt(s.track_count), 'ok'),
-          kv('queue', fmt(s.queue), s.queue > 0 ? 'warn' : ''),
+        statsRow(
+          statCard('artists', formatNumber(stats.artists)),
+          statCard('albums', formatNumber(stats.albums_total)),
+          statCard('tracks', formatNumber(stats.track_count), 'ok'),
+          statCard('queue', formatNumber(stats.queue), stats.queue > 0 ? 'warn' : ''),
         ),
-        s.disk_free_gb != null ? row(kv('free disk', fmtGB(s.disk_free_gb)), kv('total', fmtGB(s.disk_total_gb))) : '',
-      ].join(''),
-    bazarr: () => {
-      const p = []
-      if (s.version) p.push(row(kv('version', s.version, 'blue')))
-      if (s.movies_total != null || s.episodes_total != null)
-        p.push(
-          row(
-            s.movies_total != null ? kv('movies', fmt(s.movies_total)) : '',
-            s.movies_missing > 0 ? kv('mov. miss.', fmt(s.movies_missing), 'warn') : '',
-            s.episodes_total != null ? kv('episodes', fmt(s.episodes_total)) : '',
-            s.episodes_missing > 0 ? kv('ep. miss.', fmt(s.episodes_missing), 'warn') : '',
-          ),
-        )
-      return p.join('')
-    },
-    jellyfin: () =>
-      [
-        row(
-          kv('movies', fmt(s.movies), 'blue'),
-          kv('series', fmt(s.series)),
-          kv('episodes', fmt(s.episodes)),
-          kv('songs', fmt(s.songs)),
-        ),
-        row(
-          kv('sessions', fmt(s.sessions_total)),
-          kv('playing', fmt(s.sessions_active), s.sessions_active > 0 ? 'ok' : ''),
-        ),
-        s.now_playing?.filter(Boolean).length
-          ? `<div class="np">▶ ${s.now_playing.filter(Boolean).slice(0, 2).map(esc).join(' · ')}</div>`
-          : '',
-      ].join(''),
-    plex: () =>
-      [
-        s.movies != null || s.series != null
-          ? row(
-              s.movies != null ? kv('movies', fmt(s.movies), 'blue') : '',
-              s.series != null ? kv('series', fmt(s.series)) : '',
-              kv('playing', fmt(s.sessions_active), s.sessions_active > 0 ? 'ok' : ''),
+        stats.disk_free_gb != null
+          ? statsRow(
+              statCard('free disk', formatGigabytes(stats.disk_free_gb)),
+              statCard('total', formatGigabytes(stats.disk_total_gb)),
             )
           : '',
-        s.libraries?.length
-          ? `<div style="font-size:.63rem;color:var(--muted);margin-top:.2rem">${s.libraries.map((l) => `${esc(l.title)}: ${l.count}`).join(' · ')}</div>`
-          : '',
       ].join(''),
-    jellyseerr: () =>
-      row(
-        kv('total req.', fmt(s.requests_total), 'blue'),
-        kv('pending', fmt(s.requests_pending), s.requests_pending > 0 ? 'warn' : ''),
-        kv('approved', fmt(s.requests_approved)),
-        kv('available', fmt(s.requests_available), 'ok'),
-      ),
-    dispatcharr: () =>
-      [
-        row(
-          kv('streams', fmt(s.total_streams), 'blue'),
-          kv('channels', fmt(s.total_channels)),
-          kv('m3u accts', fmt(s.m3u_accounts)),
-        ),
-        row(
-          kv('epg src.', fmt(s.epg_sources)),
-          s.epg_errors ? kv('epg err.', s.epg_errors, 'err') : '',
-          s.epg_ok ? kv('epg ok', s.epg_ok, 'ok') : '',
-        ),
-      ].join(''),
-    mediaflow: () => (s.status ? row(kv('status', s.status, s.status === 'healthy' ? 'ok' : 'warn')) : ''),
-    qbittorrent: () => {
-      const rows = []
-      if (s.version) rows.push(row(kv('version', s.version, 'blue')))
-      if (s.active_torrents != null)
-        rows.push(
-          row(
-            kv('active', s.active_torrents, s.active_torrents > 0 ? 'ok' : ''),
-            kv("dl'ing", s.downloading != null ? s.downloading : '—'),
-            kv('seeding', s.seeding != null ? s.seeding : '—'),
+
+    bazarr: () => {
+      const parts = []
+      if (stats.version) parts.push(statsRow(statCard('version', stats.version, 'blue')))
+      if (stats.movies_total != null || stats.episodes_total != null) {
+        parts.push(
+          statsRow(
+            stats.movies_total != null ? statCard('movies', formatNumber(stats.movies_total)) : '',
+            stats.movies_missing > 0 ? statCard('mov. miss.', formatNumber(stats.movies_missing), 'warn') : '',
+            stats.episodes_total != null ? statCard('episodes', formatNumber(stats.episodes_total)) : '',
+            stats.episodes_missing > 0 ? statCard('ep. miss.', formatNumber(stats.episodes_missing), 'warn') : '',
           ),
         )
-      if (s.dl_speed != null)
-        rows.push(row(kv('↓ speed', fmtRate(s.dl_speed), 'ok'), kv('↑ speed', fmtRate(s.up_speed || 0))))
-      if (s.dl_session != null && s.dl_session + s.up_session > 0)
-        rows.push(row(kv('sess ↓', fmtBytes(s.dl_session)), kv('sess ↑', fmtBytes(s.up_session || 0))))
+      }
+      return parts.join('')
+    },
+
+    jellyfin: () =>
+      [
+        statsRow(
+          statCard('movies', formatNumber(stats.movies), 'blue'),
+          statCard('series', formatNumber(stats.series)),
+          statCard('episodes', formatNumber(stats.episodes)),
+          statCard('songs', formatNumber(stats.songs)),
+        ),
+        statsRow(
+          statCard('sessions', formatNumber(stats.sessions_total)),
+          statCard('playing', formatNumber(stats.sessions_active), stats.sessions_active > 0 ? 'ok' : ''),
+        ),
+        stats.now_playing?.filter(Boolean).length
+          ? `<div class="np">▶ ${stats.now_playing.filter(Boolean).slice(0, 2).map(escapeHtml).join(' · ')}</div>`
+          : '',
+      ].join(''),
+
+    plex: () =>
+      [
+        stats.movies != null || stats.series != null
+          ? statsRow(
+              stats.movies != null ? statCard('movies', formatNumber(stats.movies), 'blue') : '',
+              stats.series != null ? statCard('series', formatNumber(stats.series)) : '',
+              statCard('playing', formatNumber(stats.sessions_active), stats.sessions_active > 0 ? 'ok' : ''),
+            )
+          : '',
+        stats.libraries?.length
+          ? `<div style="font-size:.63rem;color:var(--muted);margin-top:.2rem">${stats.libraries.map((lib) => `${escapeHtml(lib.title)}: ${lib.count}`).join(' · ')}</div>`
+          : '',
+      ].join(''),
+
+    jellyseerr: () =>
+      statsRow(
+        statCard('total req.', formatNumber(stats.requests_total), 'blue'),
+        statCard('pending', formatNumber(stats.requests_pending), stats.requests_pending > 0 ? 'warn' : ''),
+        statCard('approved', formatNumber(stats.requests_approved)),
+        statCard('available', formatNumber(stats.requests_available), 'ok'),
+      ),
+
+    dispatcharr: () =>
+      [
+        statsRow(
+          statCard('streams', formatNumber(stats.total_streams), 'blue'),
+          statCard('channels', formatNumber(stats.total_channels)),
+          statCard('m3u accts', formatNumber(stats.m3u_accounts)),
+        ),
+        statsRow(
+          statCard('epg src.', formatNumber(stats.epg_sources)),
+          stats.epg_errors ? statCard('epg err.', stats.epg_errors, 'err') : '',
+          stats.epg_ok ? statCard('epg ok', stats.epg_ok, 'ok') : '',
+        ),
+      ].join(''),
+
+    mediaflow: () =>
+      stats.status ? statsRow(statCard('status', stats.status, stats.status === 'healthy' ? 'ok' : 'warn')) : '',
+
+    qbittorrent: () => {
+      const rows = []
+      if (stats.version) rows.push(statsRow(statCard('version', stats.version, 'blue')))
+      if (stats.active_torrents != null) {
+        rows.push(
+          statsRow(
+            statCard('active', stats.active_torrents, stats.active_torrents > 0 ? 'ok' : ''),
+            statCard("dl'ing", stats.downloading != null ? stats.downloading : '—'),
+            statCard('seeding', stats.seeding != null ? stats.seeding : '—'),
+          ),
+        )
+      }
+      if (stats.dl_speed != null) {
+        rows.push(
+          statsRow(
+            statCard('↓ speed', formatDataRate(stats.dl_speed), 'ok'),
+            statCard('↑ speed', formatDataRate(stats.up_speed || 0)),
+          ),
+        )
+      }
+      if (stats.dl_session != null && stats.dl_session + stats.up_session > 0) {
+        rows.push(
+          statsRow(
+            statCard('sess ↓', formatBytes(stats.dl_session)),
+            statCard('sess ↑', formatBytes(stats.up_session || 0)),
+          ),
+        )
+      }
       return rows.join('')
     },
   }
-  const fn = r[sid]
-  if (!fn) return ''
-  const html = fn()
-  if (!html?.trim()) return ''
-  return `<div class="sbox">${html}</div>`
+
+  const renderer = renderers[serviceId]
+  if (!renderer) return ''
+  const renderedHtml = renderer()
+  if (!renderedHtml?.trim()) return ''
+  return `<div class="sbox">${renderedHtml}</div>`
 }
 
-// ── History bar ──
-function bar(h) {
-  const n = 40,
-    pad = n - Math.min(h.length, n)
+// ── History Bar ──
+function renderHistoryBar(history) {
+  const maxBars = 40
+  const padding = maxBars - Math.min(history.length, maxBars)
   return (
-    '<span class="x"></span>'.repeat(pad) +
-    h
-      .slice(-n)
-      .map((r) => `<span class="${r.ok ? 'ok' : 'er'}" title="${esc(r.message)}"></span>`)
+    '<span class="x"></span>'.repeat(padding) +
+    history
+      .slice(-maxBars)
+      .map((record) => `<span class="${record.ok ? 'ok' : 'er'}" title="${escapeHtml(record.message)}"></span>`)
       .join('')
   )
 }
 
-// ── Header ──
+// ── Header Overview ──
 function buildOverview() {
-  const all = Object.values(statusData)
-  if (!all.length) return ''
-  const up = all.filter((s) => s.current.ok).length,
-    dn = all.length - up
-  const issues = Object.values(statsData).reduce((a, s) => a + (s?.health_errors || 0) + (s?.health_warnings || 0), 0)
-  const logErrs = errorsData.filter((e) => e.severity === 'error').length
-  const logWarns = errorsData.filter((e) => e.severity === 'warning').length
-  updateErrBadge(logErrs, logWarns)
-  const errStat =
-    logErrs > 0
-      ? `<div class="hdr-stat err"><div class="val">${logErrs}</div><div class="lbl">Log Errors</div></div>`
-      : logWarns > 0
-        ? `<div class="hdr-stat warn"><div class="val">${logWarns}</div><div class="lbl">Warnings</div></div>`
+  const allServices = Object.values(statusData)
+  if (!allServices.length) return ''
+
+  const upCount = allServices.filter((svc) => svc.current.ok).length
+  const downCount = allServices.length - upCount
+  const healthIssues = Object.values(statsData).reduce(
+    (total, svcStats) => total + (svcStats?.health_errors || 0) + (svcStats?.health_warnings || 0),
+    0,
+  )
+
+  const logErrorCount = errorsData.filter((entry) => entry.severity === 'error').length
+  const logWarningCount = errorsData.filter((entry) => entry.severity === 'warning').length
+  updateErrBadge(logErrorCount, logWarningCount)
+
+  const errorStat =
+    logErrorCount > 0
+      ? `<div class="hdr-stat err"><div class="val">${logErrorCount}</div><div class="lbl">Log Errors</div></div>`
+      : logWarningCount > 0
+        ? `<div class="hdr-stat warn"><div class="val">${logWarningCount}</div><div class="lbl">Warnings</div></div>`
         : ''
+
   return `
-    <div class="hdr-stat ${dn === 0 ? 'ok' : dn > 2 ? 'err' : 'warn'}"><div class="val">${up}/${all.length}</div><div class="lbl">Services</div></div>
-    <div class="hdr-stat ${issues > 0 ? 'err' : 'ok'}"><div class="val">${issues || '&#10003;'}</div><div class="lbl">Issues</div></div>
-    ${errStat}`
+    <div class="hdr-stat ${downCount === 0 ? 'ok' : downCount > 2 ? 'err' : 'warn'}"><div class="val">${upCount}/${allServices.length}</div><div class="lbl">Services</div></div>
+    <div class="hdr-stat ${healthIssues > 0 ? 'err' : 'ok'}"><div class="val">${healthIssues || '&#10003;'}</div><div class="lbl">Issues</div></div>
+    ${errorStat}`
 }
 
-// ── Card ──
-function renderCard(sid, s) {
-  const cur = s.current,
-    cls = cur.ok === null ? 'pend' : cur.ok ? 'up' : 'dn'
-  const st = statsData[sid] || {}
-  const installed = st.version || st.addon_version || st.bazarr_version || ''
-  const webUrl = WEB_URLS[sid] || ''
-  if (sid === 'system')
-    return `<div class="card up" id="card-${sid}" onclick="openModal('${sid}')" title="Click for details">
-    <div class="ct">&#x1F5A5; ${esc(cur.name)}</div>${renderStats(sid, st)}</div>`
-  const acts = `<div class="card-acts">
+// ── Service Card ──
+function renderCard(serviceId, serviceData) {
+  const current = serviceData.current
+  const cssClass = current.ok === null ? 'pend' : current.ok ? 'up' : 'dn'
+  const serviceStats = statsData[serviceId] || {}
+  const installed = serviceStats.version || serviceStats.addon_version || serviceStats.bazarr_version || ''
+  const webUrl = WEB_URLS[serviceId] || ''
+
+  if (serviceId === 'system') {
+    return `<div class="card up" id="card-${serviceId}" onclick="openServiceModal('${serviceId}')" title="Click for details">
+    <div class="ct">&#x1F5A5; ${escapeHtml(current.name)}</div>${renderStats(serviceId, serviceStats)}</div>`
+  }
+
+  const actionButtons = `<div class="card-acts">
     ${webUrl ? `<button class="card-act" onclick="event.stopPropagation();window.open('${webUrl}','_blank')" title="Open web UI">&#x2197;</button>` : ''}
-    <button class="card-act" onclick="event.stopPropagation();openModal('${sid}','logs')" title="View logs">&#x2261;</button>
-    <button class="card-act danger" onclick="event.stopPropagation();quickRestart('${sid}')" title="Restart service">&#x27F3;</button>
+    <button class="card-act" onclick="event.stopPropagation();openServiceModal('${serviceId}','logs')" title="View logs">&#x2261;</button>
+    <button class="card-act danger" onclick="event.stopPropagation();quickRestartService('${serviceId}')" title="Restart service">&#x27F3;</button>
   </div>`
-  return `<div class="card ${cls}" id="card-${sid}" onclick="openModal('${sid}')" title="Click for details">
-    ${acts}
-    <div class="ct">${esc(cur.name)}<span class="sbadge ${cur.systemd_ok ? 'sys-up' : 'sys-dn'}" title="systemd: ${esc(cur.systemd || 'unknown')}">SYS</span>${cur.http_ok === null || cur.http_ok === undefined ? '' : `<span class="sbadge ${cur.http_ok ? 'http-up' : 'http-dn'}" title="${esc(cur.message || '')}">${'HTTP'}</span>`}${cur.latency_ms != null ? `<span class="lat">${cur.latency_ms}ms</span>` : ''}</div>
-    <div class="meta">${esc(cur.message || '—')} · systemd: ${esc(cur.systemd)}</div>
-    ${renderStats(sid, st)}${renderVersion(sid, installed)}
-    <div class="bar">${bar(s.history)}</div></div>`
+
+  const httpBadge =
+    current.http_ok === null || current.http_ok === undefined
+      ? ''
+      : `<span class="sbadge ${current.http_ok ? 'http-up' : 'http-dn'}" title="${escapeHtml(current.message || '')}">${'HTTP'}</span>`
+
+  const latencyBadge = current.latency_ms != null ? `<span class="lat">${current.latency_ms}ms</span>` : ''
+
+  return `<div class="card ${cssClass}" id="card-${serviceId}" onclick="openServiceModal('${serviceId}')" title="Click for details">
+    ${actionButtons}
+    <div class="ct">${escapeHtml(current.name)}<span class="sbadge ${current.systemd_ok ? 'sys-up' : 'sys-dn'}" title="systemd: ${escapeHtml(current.systemd || 'unknown')}">SYS</span>${httpBadge}${latencyBadge}</div>
+    <div class="meta">${escapeHtml(current.message || '—')} · systemd: ${escapeHtml(current.systemd)}</div>
+    ${renderStats(serviceId, serviceStats)}${renderVersion(serviceId, installed)}
+    <div class="bar">${renderHistoryBar(serviceData.history)}</div></div>`
 }
 
-// ── Data fetch ──
-async function safeJson(url, opts) {
+// ── Data Fetch ──
+async function safeJson(url, opts = {}) {
   try {
-    const r = await fetch(url, opts)
-    if (!r.ok) return null
-    return await r.json()
+    const response = await axios({
+      url,
+      method: opts.method || 'GET',
+      headers: opts.headers,
+      data: opts.body,
+    })
+    return response.data
   } catch {
     return null
   }
@@ -653,159 +823,194 @@ async function refresh() {
   if (stats) statsData = stats
   if (versions) versionsData = versions
   if (!Object.keys(statusData).length) return
+
   document.getElementById('overview').innerHTML = buildOverview()
   document.getElementById('ts-hdr').textContent =
     '⟳ ' + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
   document.getElementById('ts').textContent =
     'Last updated: ' + new Date().toLocaleString('en-CA', { timeZone: TZ, hour12: false })
-  const cats = {}
-  for (const [sid, s] of Object.entries(statusData)) {
-    const cat = s.current.category || 'other'
-    ;(cats[cat] = cats[cat] || []).push([sid, s])
+
+  const categories = {}
+  for (const [serviceId, serviceData] of Object.entries(statusData)) {
+    const category = serviceData.current.category || 'other'
+    ;(categories[category] = categories[category] || []).push([serviceId, serviceData])
   }
+
   let html = ''
-  for (const catKey of ['system', 'streaming', 'indexers', 'arr', 'media', 'dispatch', 'downloads', 'infra', 'other']) {
-    const items = cats[catKey]
+  for (const categoryKey of [
+    'system',
+    'streaming',
+    'indexers',
+    'arr',
+    'media',
+    'dispatch',
+    'downloads',
+    'infra',
+    'other',
+  ]) {
+    const items = categories[categoryKey]
     if (!items?.length) continue
-    html += `<div class="cat-hdr">${CATS[catKey] || catKey}</div>`
-    html += `<div class="grid${catKey === 'system' ? ' sys-grid' : ''}">`
-    for (const [sid, s] of items) html += renderCard(sid, s)
+    html += `<div class="cat-hdr">${CATEGORY_LABELS[categoryKey] || categoryKey}</div>`
+    html += `<div class="grid${categoryKey === 'system' ? ' sys-grid' : ''}">`
+    for (const [serviceId, serviceData] of items) html += renderCard(serviceId, serviceData)
     html += '</div>'
   }
   document.getElementById('cats').innerHTML = html
 }
 
 // ── Logs ──
-let _logLines = []
+let logLines = []
+
 async function fetchLogs() {
-  const u = document.getElementById('unit').value
-  if (!u) return
-  const n = document.getElementById('log-lines')?.value || '200'
-  const b = document.getElementById('logbox'),
-    st = document.getElementById('log-status')
-  if (curLogUnit !== u) {
-    b.innerHTML = '<span class="spin"></span> Loading…'
-    curLogUnit = u
+  const unitName = document.getElementById('unit').value
+  if (!unitName) return
+  const lineCount = document.getElementById('log-lines')?.value || '200'
+  const logBox = document.getElementById('logbox')
+  const statusLabel = document.getElementById('log-status')
+
+  if (currentLogUnit !== unitName) {
+    logBox.innerHTML = '<span class="spin"></span> Loading…'
+    currentLogUnit = unitName
   }
-  const d = await safeJson('/api/logs/' + encodeURIComponent(u) + '?n=' + n)
-  if (!d) {
-    b.innerHTML = '<span style="color:var(--err)">Error fetching logs.</span>'
+
+  const data = await safeJson('/api/logs/' + encodeURIComponent(unitName) + '?n=' + lineCount)
+  if (!data) {
+    logBox.innerHTML = '<span style="color:var(--err)">Error fetching logs.</span>'
     return
   }
-  if (d.error) {
-    b.innerHTML = '<span style="color:var(--err)">' + esc(d.error) + '</span>'
+  if (data.error) {
+    logBox.innerHTML = '<span style="color:var(--err)">' + escapeHtml(data.error) + '</span>'
     return
   }
-  _logLines = d.lines || []
+
+  logLines = data.lines || []
   filterLogs()
-  st.textContent =
-    `${_logLines.length} lines · ` + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
+  statusLabel.textContent =
+    `${logLines.length} lines · ` + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
 }
+
 function filterLogs() {
-  const b = document.getElementById('logbox')
-  if (!_logLines.length) {
-    b.innerHTML = '<span style="color:var(--muted)">No logs.</span>'
+  const logBox = document.getElementById('logbox')
+  if (!logLines.length) {
+    logBox.innerHTML = '<span style="color:var(--muted)">No logs.</span>'
     return
   }
-  const q = (document.getElementById('log-search')?.value || '').toLowerCase()
-  const lines = q ? _logLines.filter((l) => l.toLowerCase().includes(q)) : _logLines
-  if (!lines.length) {
-    b.innerHTML = '<span style="color:var(--muted)">No lines match filter.</span>'
+
+  const query = (document.getElementById('log-search')?.value || '').toLowerCase()
+  const filteredLines = query ? logLines.filter((line) => line.toLowerCase().includes(query)) : logLines
+
+  if (!filteredLines.length) {
+    logBox.innerHTML = '<span style="color:var(--muted)">No lines match filter.</span>'
     return
   }
-  const atBot = b.scrollHeight - b.scrollTop - b.clientHeight < 60
-  const autoscroll = document.getElementById('log-autoscroll')?.checked !== false
-  b.innerHTML = lines
+
+  const isNearBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 60
+  const autoscrollEnabled = document.getElementById('log-autoscroll')?.checked !== false
+
+  logBox.innerHTML = filteredLines
     .map(
-      (l) =>
-        `<span class="${/error|critical|fail|exception/i.test(l) ? 'le' : /warn/i.test(l) ? 'lw' : ''}">${esc(l)}</span>`,
+      (line) =>
+        `<span class="${/error|critical|fail|exception/i.test(line) ? 'le' : /warn/i.test(line) ? 'lw' : ''}">${escapeHtml(line)}</span>`,
     )
     .join('\n')
-  if (autoscroll && atBot) b.scrollTop = b.scrollHeight
+
+  if (autoscrollEnabled && isNearBottom) logBox.scrollTop = logBox.scrollHeight
 }
+
 function initLogs() {
-  if (logsReady) return
-  logsReady = true
+  if (logsInitialized) return
+  logsInitialized = true
   fetchLogs()
-  logTimer = setInterval(() => {
+  logRefreshTimer = setInterval(() => {
     if (document.getElementById('p-l').classList.contains('active')) fetchLogs()
   }, 5000)
 }
 
 // ── Settings ──
-let keysData = {},
-  keysOriginal = {}
-let urlsData = {},
-  urlsOriginal = {}
-function toggleKeyVis(k) {
-  const inp = document.getElementById('key_' + k)
-  const btn = document.getElementById('eye_' + k)
-  if (!inp) return
-  if (inp.type === 'password') {
-    inp.type = 'text'
-    btn.textContent = '🙈'
+let apiKeysData = {}
+let apiKeysOriginal = {}
+let serviceUrlsData = {}
+let serviceUrlsOriginal = {}
+
+function toggleKeyVisibility(key) {
+  const input = document.getElementById('key_' + key)
+  const button = document.getElementById('eye_' + key)
+  if (!input) return
+  if (input.type === 'password') {
+    input.type = 'text'
+    button.textContent = '🙈'
   } else {
-    inp.type = 'password'
-    btn.textContent = '👁'
+    input.type = 'password'
+    button.textContent = '👁'
   }
 }
-function copyKey(k) {
-  const inp = document.getElementById('key_' + k)
-  if (!inp) return
-  navigator.clipboard.writeText(inp.value).then(() => {
-    const btn = document.getElementById('copy_' + k)
-    const prev = btn.textContent
-    btn.textContent = '✓'
+
+function copyApiKey(key) {
+  const input = document.getElementById('key_' + key)
+  if (!input) return
+  navigator.clipboard.writeText(input.value).then(() => {
+    const button = document.getElementById('copy_' + key)
+    const previousText = button.textContent
+    button.textContent = '✓'
     setTimeout(() => {
-      btn.textContent = prev
+      button.textContent = previousText
     }, 1500)
   })
 }
-function markChanged(k) {
-  const inp = document.getElementById('key_' + k)
-  if (!inp) return
-  inp.classList.toggle('changed', inp.value !== keysOriginal[k])
+
+function markKeyChanged(key) {
+  const input = document.getElementById('key_' + key)
+  if (!input) return
+  input.classList.toggle('changed', input.value !== apiKeysOriginal[key])
 }
-function markUrlChanged(k) {
-  const inp = document.getElementById('url_' + k)
-  if (!inp) return
-  inp.classList.toggle('changed', inp.value !== urlsOriginal[k])
+
+function markUrlChanged(key) {
+  const input = document.getElementById('url_' + key)
+  if (!input) return
+  input.classList.toggle('changed', input.value !== serviceUrlsOriginal[key])
 }
+
 async function loadSettings() {
-  const g = document.getElementById('settings-grid')
+  const gridElement = document.getElementById('settings-grid')
   const keys = await safeJson('/api/settings/keys')
   const urls = await safeJson('/api/settings/urls')
+
   if (keys) {
-    keysData = keys
-    keysOriginal = Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.value || '']))
+    apiKeysData = keys
+    apiKeysOriginal = Object.fromEntries(Object.entries(keys).map(([key, val]) => [key, val.value || '']))
   }
   if (urls) {
-    urlsData = urls
-    urlsOriginal = Object.fromEntries(Object.entries(urls).map(([k, v]) => [k, v.value || '']))
+    serviceUrlsData = urls
+    serviceUrlsOriginal = Object.fromEntries(Object.entries(urls).map(([key, val]) => [key, val.value || '']))
   }
+
   // Group keys
-  const groups = {}
-  for (const [k, v] of Object.entries(keys || {})) {
-    const gr = v.group || 'Other'
-    if (!groups[gr]) groups[gr] = []
-    groups[gr].push([k, v])
+  const keyGroups = {}
+  for (const [key, val] of Object.entries(keys || {})) {
+    const groupName = val.group || 'Other'
+    if (!keyGroups[groupName]) keyGroups[groupName] = []
+    keyGroups[groupName].push([key, val])
   }
-  const groupOrder = ['Arr Suite', 'Indexers', 'Media Servers', 'Streaming', 'Dispatching', 'Downloads', 'Other']
-  const sorted = groupOrder.filter((g) => groups[g]).concat(Object.keys(groups).filter((g) => !groupOrder.includes(g)))
-  const keysHtml = sorted
+
+  const keyGroupOrder = ['Arr Suite', 'Indexers', 'Media Servers', 'Streaming', 'Dispatching', 'Downloads', 'Other']
+  const sortedKeyGroups = keyGroupOrder
+    .filter((name) => keyGroups[name])
+    .concat(Object.keys(keyGroups).filter((name) => !keyGroupOrder.includes(name)))
+
+  const keysHtml = sortedKeyGroups
     .map(
-      (gr) => `
+      (groupName) => `
     <div class="key-group">
-      <div class="key-group-label">${esc(gr)}</div>
-      ${groups[gr]
+      <div class="key-group-label">${escapeHtml(groupName)}</div>
+      ${keyGroups[groupName]
         .map(
-          ([k, v]) => `
+          ([key, val]) => `
       <div class="key-row">
-        <label title="${esc(k)}">${esc(v.label)}</label>
+        <label title="${escapeHtml(key)}">${escapeHtml(val.label)}</label>
         <div class="key-input-wrap">
-          <input type="password" id="key_${esc(k)}" value="${esc(v.value || '')}" placeholder="(not set)" oninput="markChanged('${esc(k)}')">
-          <button class="key-btn" id="eye_${esc(k)}" onclick="toggleKeyVis('${esc(k)}')" title="Show/hide">👁</button>
-          <button class="key-btn" id="copy_${esc(k)}" onclick="copyKey('${esc(k)}')" title="Copy">⎘</button>
+          <input type="password" id="key_${escapeHtml(key)}" value="${escapeHtml(val.value || '')}" placeholder="(not set)" oninput="markKeyChanged('${escapeHtml(key)}')">
+          <button class="key-btn" id="eye_${escapeHtml(key)}" onclick="toggleKeyVisibility('${escapeHtml(key)}')" title="Show/hide">👁</button>
+          <button class="key-btn" id="copy_${escapeHtml(key)}" onclick="copyApiKey('${escapeHtml(key)}')" title="Copy">⎘</button>
         </div>
       </div>`,
         )
@@ -813,29 +1018,32 @@ async function loadSettings() {
     </div>`,
     )
     .join('')
+
   // Group URLs
   const urlGroups = {}
-  for (const [k, v] of Object.entries(urls || {})) {
-    const gr = v.group || 'Other'
-    if (!urlGroups[gr]) urlGroups[gr] = []
-    urlGroups[gr].push([k, v])
+  for (const [key, val] of Object.entries(urls || {})) {
+    const groupName = val.group || 'Other'
+    if (!urlGroups[groupName]) urlGroups[groupName] = []
+    urlGroups[groupName].push([key, val])
   }
+
   const urlGroupOrder = ['Streaming', 'Indexers', 'Arr Suite', 'Media Servers', 'Dispatching', 'Downloads', 'Other']
-  const urlSorted = urlGroupOrder
-    .filter((g) => urlGroups[g])
-    .concat(Object.keys(urlGroups).filter((g) => !urlGroupOrder.includes(g)))
-  const urlsHtml = urlSorted
+  const sortedUrlGroups = urlGroupOrder
+    .filter((name) => urlGroups[name])
+    .concat(Object.keys(urlGroups).filter((name) => !urlGroupOrder.includes(name)))
+
+  const urlsHtml = sortedUrlGroups
     .map(
-      (gr) => `
+      (groupName) => `
     <div class="key-group">
-      <div class="key-group-label">${esc(gr)}</div>
-      ${urlGroups[gr]
+      <div class="key-group-label">${escapeHtml(groupName)}</div>
+      ${urlGroups[groupName]
         .map(
-          ([k, v]) => `
+          ([key, val]) => `
       <div class="key-row">
-        <label title="${esc(k)}">${esc(v.label)}</label>
+        <label title="${escapeHtml(key)}">${escapeHtml(val.label)}</label>
         <div class="key-input-wrap">
-          <input type="text" id="url_${esc(k)}" value="${esc(v.value || '')}" placeholder="http://127.0.0.1:..." oninput="markUrlChanged('${esc(k)}')">
+          <input type="text" id="url_${escapeHtml(key)}" value="${escapeHtml(val.value || '')}" placeholder="http://127.0.0.1:..." oninput="markUrlChanged('${escapeHtml(key)}')">
         </div>
       </div>`,
         )
@@ -843,17 +1051,18 @@ async function loadSettings() {
     </div>`,
     )
     .join('')
-  g.innerHTML = `
+
+  gridElement.innerHTML = `
   <div class="settings-sec">
     <h3>API Keys</h3>
     ${keysHtml}
-    <button class="btn-save" onclick="saveKeys()">Save Keys</button>
+    <button class="btn-save" onclick="saveApiKeys()">Save Keys</button>
     <div id="keys-msg"></div>
   </div>
   <div class="settings-sec">
     <h3>Service URLs</h3>
     ${urlsHtml}
-    <button class="btn-save" onclick="saveUrls()">Save URLs</button>
+    <button class="btn-save" onclick="saveServiceUrls()">Save URLs</button>
     <div id="urls-msg"></div>
   </div>
   <div class="settings-sec">
@@ -868,301 +1077,327 @@ async function loadSettings() {
   </div>`
 }
 
-async function saveKeys() {
+async function saveApiKeys() {
   const updates = {}
-  for (const k of Object.keys(keysData)) {
-    const el = document.getElementById('key_' + k)
-    if (el) updates[k] = el.value.trim()
+  for (const key of Object.keys(apiKeysData)) {
+    const element = document.getElementById('key_' + key)
+    if (element) updates[key] = element.value.trim()
   }
-  const msg = document.getElementById('keys-msg')
-  const r = await safeJson('/api/settings/keys', {
+  const messageElement = document.getElementById('keys-msg')
+  const result = await safeJson('/api/settings/keys', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
   })
-  if (r?.ok) {
-    msg.className = 'msg-ok'
-    msg.textContent = 'Saved!'
+  if (result?.ok) {
+    messageElement.className = 'msg-ok'
+    messageElement.textContent = 'Saved!'
   } else {
-    msg.className = 'msg-err'
-    msg.textContent = 'Error saving keys.'
+    messageElement.className = 'msg-err'
+    messageElement.textContent = 'Error saving keys.'
   }
   setTimeout(() => {
-    msg.textContent = ''
+    messageElement.textContent = ''
   }, 3000)
 }
 
-async function saveUrls() {
+async function saveServiceUrls() {
   const updates = {}
-  for (const k of Object.keys(urlsData)) {
-    const el = document.getElementById('url_' + k)
-    if (el) updates[k] = el.value.trim()
+  for (const key of Object.keys(serviceUrlsData)) {
+    const element = document.getElementById('url_' + key)
+    if (element) updates[key] = element.value.trim()
   }
-  const msg = document.getElementById('urls-msg')
-  const r = await safeJson('/api/settings/urls', {
+  const messageElement = document.getElementById('urls-msg')
+  const result = await safeJson('/api/settings/urls', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
   })
-  if (r?.ok) {
-    msg.className = 'msg-ok'
-    msg.textContent = 'URLs saved!'
-    urlsOriginal = Object.fromEntries(Object.entries(urlsData).map(([k]) => [k, updates[k] || '']))
-    document.querySelectorAll('[id^="url_"]').forEach((el) => el.classList.remove('changed'))
+  if (result?.ok) {
+    messageElement.className = 'msg-ok'
+    messageElement.textContent = 'URLs saved!'
+    serviceUrlsOriginal = Object.fromEntries(Object.entries(serviceUrlsData).map(([key]) => [key, updates[key] || '']))
+    document.querySelectorAll('[id^="url_"]').forEach((element) => element.classList.remove('changed'))
   } else {
-    msg.className = 'msg-err'
-    msg.textContent = r?.error || 'Error saving URLs.'
+    messageElement.className = 'msg-err'
+    messageElement.textContent = result?.error || 'Error saving URLs.'
   }
   setTimeout(() => {
-    msg.textContent = ''
+    messageElement.textContent = ''
   }, 4000)
 }
 
 async function changePassword() {
-  const cur = document.getElementById('pw-cur').value
-  const nw = document.getElementById('pw-new').value
-  const cf = document.getElementById('pw-conf').value
-  const msg = document.getElementById('pw-msg')
-  if (!nw) {
-    msg.className = 'msg-err'
-    msg.textContent = 'New password required.'
+  const currentPassword = document.getElementById('pw-cur').value
+  const newPassword = document.getElementById('pw-new').value
+  const confirmPassword = document.getElementById('pw-conf').value
+  const messageElement = document.getElementById('pw-msg')
+
+  if (!newPassword) {
+    messageElement.className = 'msg-err'
+    messageElement.textContent = 'New password required.'
     return
   }
-  if (nw !== cf) {
-    msg.className = 'msg-err'
-    msg.textContent = 'Passwords do not match.'
+  if (newPassword !== confirmPassword) {
+    messageElement.className = 'msg-err'
+    messageElement.textContent = 'Passwords do not match.'
     return
   }
-  const r = await safeJson('/api/settings/password', {
+
+  const result = await safeJson('/api/settings/password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ current: cur, new_password: nw }),
+    body: JSON.stringify({ current: currentPassword, new_password: newPassword }),
   })
-  if (r?.ok) {
-    msg.className = 'msg-ok'
-    msg.textContent = 'Password changed!'
+
+  if (result?.ok) {
+    messageElement.className = 'msg-ok'
+    messageElement.textContent = 'Password changed!'
     document.getElementById('pw-cur').value = ''
     document.getElementById('pw-new').value = ''
     document.getElementById('pw-conf').value = ''
   } else {
-    msg.className = 'msg-err'
-    msg.textContent = r?.error || 'Error changing password.'
+    messageElement.className = 'msg-err'
+    messageElement.textContent = result?.error || 'Error changing password.'
   }
   setTimeout(() => {
-    msg.textContent = ''
+    messageElement.textContent = ''
   }, 4000)
 }
 
-// ── Perms tab ──
+// ── Permissions Tab ──
 const TZ = 'America/Vancouver'
-function fmtTs(ts) {
-  return ts ? new Date(ts * 1000).toLocaleString('en-CA', { timeZone: TZ, hour12: false }) : '—'
-}
-let permScanData = [],
-  permsScanned = false
-function initPerms() {
-  if (!permsScanned) runScan()
+
+function formatTimestamp(unixTs) {
+  return unixTs ? new Date(unixTs * 1000).toLocaleString('en-CA', { timeZone: TZ, hour12: false }) : '—'
 }
 
-async function runScan() {
-  const btn = document.getElementById('scan-btn')
-  const meta = document.getElementById('scan-meta')
-  btn.disabled = true
-  btn.textContent = 'Scanning…'
-  meta.textContent = ''
-  const d = await safeJson('/api/perms/scan', { method: 'POST' })
-  btn.disabled = false
-  btn.textContent = '⟳ Scan directories'
-  permsScanned = true
-  if (!d) {
-    meta.textContent = 'Scan failed.'
-    return
-  }
-  permScanData = d.results || []
-  const ok = permScanData.filter((r) => r.ok).length
-  const bad = permScanData.filter((r) => !r.ok && r.exists && !r.missing).length
-  const miss = permScanData.filter((r) => r.missing).length
-  meta.textContent =
-    `${ok} OK · ` +
-    (bad ? `<span style="color:var(--err)">${bad} mismatch</span> · ` : `0 mismatch · `) +
-    `${miss} missing · ${fmtTs(d.ts)}`
-  meta.innerHTML = meta.textContent
-  renderPermResults()
+let permissionScanResults = []
+let permissionsScanned = false
+
+function initPermissions() {
+  if (!permissionsScanned) runPermissionScan()
 }
 
-function renderPermResults() {
-  const el = document.getElementById('perm-results')
-  if (!permScanData.length) {
-    el.innerHTML = '<div style="color:var(--muted);padding:.5rem">No data. Click Scan.</div>'
+async function runPermissionScan() {
+  const scanButton = document.getElementById('scan-btn')
+  const metaLabel = document.getElementById('scan-meta')
+  scanButton.disabled = true
+  scanButton.textContent = 'Scanning…'
+  metaLabel.textContent = ''
+
+  const data = await safeJson('/api/perms/scan', { method: 'POST' })
+  scanButton.disabled = false
+  scanButton.textContent = '⟳ Scan directories'
+  permissionsScanned = true
+
+  if (!data) {
+    metaLabel.textContent = 'Scan failed.'
     return
   }
-  const bad = permScanData.filter((r) => !r.ok && !r.missing)
+
+  permissionScanResults = data.results || []
+  const okCount = permissionScanResults.filter((result) => result.ok).length
+  const mismatchCount = permissionScanResults.filter((result) => !result.ok && result.exists && !result.missing).length
+  const missingCount = permissionScanResults.filter((result) => result.missing).length
+
+  metaLabel.textContent =
+    `${okCount} OK · ` +
+    (mismatchCount ? `<span style="color:var(--err)">${mismatchCount} mismatch</span> · ` : `0 mismatch · `) +
+    `${missingCount} missing · ${formatTimestamp(data.ts)}`
+  metaLabel.innerHTML = metaLabel.textContent
+
+  renderPermissionResults()
+}
+
+function renderPermissionResults() {
+  const container = document.getElementById('perm-results')
+  if (!permissionScanResults.length) {
+    container.innerHTML = '<div style="color:var(--muted);padding:.5rem">No data. Click Scan.</div>'
+    return
+  }
+
+  const mismatched = permissionScanResults.filter((result) => !result.ok && !result.missing)
 
   // Populate section filter dropdown (first scan only)
-  const secSel = document.getElementById('perm-section-filter')
-  if (secSel && secSel.options.length === 1) {
-    ;[...new Set(permScanData.map((r) => r.section || 'Other'))].forEach((s) => {
-      const o = document.createElement('option')
-      o.value = s
-      o.textContent = s
-      secSel.appendChild(o)
+  const sectionSelect = document.getElementById('perm-section-filter')
+  if (sectionSelect && sectionSelect.options.length === 1) {
+    ;[...new Set(permissionScanResults.map((result) => result.section || 'Other'))].forEach((section) => {
+      const option = document.createElement('option')
+      option.value = section
+      option.textContent = section
+      sectionSelect.appendChild(option)
     })
   }
+
   const issuesOnly = document.getElementById('perm-issues-only')?.checked
   const sectionFilter = document.getElementById('perm-section-filter')?.value || ''
 
   // Group by section (applying filters)
-  const sections = []
+  const sectionNames = []
   const sectionMap = {}
-  permScanData.forEach((r, i) => {
-    if (issuesOnly && r.ok) return
-    const sec = r.section || 'Other'
-    if (sectionFilter && sec !== sectionFilter) return
-    if (!sectionMap[sec]) {
-      sectionMap[sec] = []
-      sections.push(sec)
+  permissionScanResults.forEach((result, index) => {
+    if (issuesOnly && result.ok) return
+    const section = result.section || 'Other'
+    if (sectionFilter && section !== sectionFilter) return
+    if (!sectionMap[section]) {
+      sectionMap[section] = []
+      sectionNames.push(section)
     }
-    sectionMap[sec].push({ r, i })
+    sectionMap[section].push({ result, index })
   })
 
-  let tbody = ''
-  sections.forEach((sec) => {
-    const entries = sectionMap[sec]
-    const secBad = entries.filter(({ r }) => !r.ok && !r.missing).length
-    const secMiss = entries.filter(({ r }) => r.missing).length
-    const badge = secBad
-      ? `<span style="color:var(--err);margin-left:.4rem;font-size:.7rem">${secBad} issue${secBad > 1 ? 's' : ''}</span>`
-      : secMiss
-        ? `<span style="color:var(--muted);margin-left:.4rem;font-size:.7rem">${secMiss} missing</span>`
+  let tableBody = ''
+  sectionNames.forEach((section) => {
+    const entries = sectionMap[section]
+    const sectionMismatchCount = entries.filter(({ result }) => !result.ok && !result.missing).length
+    const sectionMissingCount = entries.filter(({ result }) => result.missing).length
+
+    const badge = sectionMismatchCount
+      ? `<span style="color:var(--err);margin-left:.4rem;font-size:.7rem">${sectionMismatchCount} issue${sectionMismatchCount > 1 ? 's' : ''}</span>`
+      : sectionMissingCount
+        ? `<span style="color:var(--muted);margin-left:.4rem;font-size:.7rem">${sectionMissingCount} missing</span>`
         : `<span style="color:var(--ok);margin-left:.4rem;font-size:.7rem">&#10003; OK</span>`
-    tbody += `<tr class="perm-section-hdr"><td colspan="9"><strong>${esc(sec)}</strong>${badge}</td></tr>`
-    entries.forEach(({ r, i }) => {
-      const rowCls = r.missing ? 'missing-row' : r.ok ? 'ok-row' : 'bad-row'
-      const statusIcon = r.missing
+
+    tableBody += `<tr class="perm-section-hdr"><td colspan="9"><strong>${escapeHtml(section)}</strong>${badge}</td></tr>`
+
+    entries.forEach(({ result, index }) => {
+      const rowClass = result.missing ? 'missing-row' : result.ok ? 'ok-row' : 'bad-row'
+      const statusIcon = result.missing
         ? '<span class="perm-miss">MISSING</span>'
-        : r.ok
+        : result.ok
           ? '<span class="perm-ok">&#10003;</span>'
           : '<span class="perm-bad">&#10007;</span>'
-      const uCls = r.cur_user !== r.exp_user && !r.missing ? 'perm-diff' : ''
-      const gCls = r.cur_group !== r.exp_group && !r.missing ? 'perm-diff' : ''
-      const mCls = r.cur_mode !== r.exp_mode && !r.missing ? 'perm-diff' : ''
-      const cb = r.missing
+      const userDiffClass = result.cur_user !== result.exp_user && !result.missing ? 'perm-diff' : ''
+      const groupDiffClass = result.cur_group !== result.exp_group && !result.missing ? 'perm-diff' : ''
+      const modeDiffClass = result.cur_mode !== result.exp_mode && !result.missing ? 'perm-diff' : ''
+      const checkbox = result.missing
         ? ''
-        : r.ok
+        : result.ok
           ? ''
-          : `<input type="checkbox" class="perm-cb" data-i="${i}" checked onchange="updateSelCount()">`
-      tbody += `<tr class="${rowCls}" data-i="${i}">
-        <td>${cb}</td>
+          : `<input type="checkbox" class="perm-cb" data-i="${index}" checked onchange="updateSelectedCount()">`
+
+      tableBody += `<tr class="${rowClass}" data-i="${index}">
+        <td>${checkbox}</td>
         <td>${statusIcon}</td>
-        <td style="color:var(--accent2);font-family:monospace">${esc(r.label)}</td>
-        <td style="font-family:monospace;font-size:.68rem;color:var(--muted2)">${esc(r.path)}</td>
-        <td><span class="${uCls}">${esc(r.cur_user)}</span></td>
-        <td><span class="${gCls}">${esc(r.cur_group)}</span></td>
-        <td style="font-family:monospace"><span class="${mCls}">${esc(r.cur_mode)}</span></td>
-        <td style="color:var(--muted);font-size:.65rem">${esc(r.exp_user)}:${esc(r.exp_group)} ${esc(r.exp_mode)}</td>
-        <td id="perm-res-${i}"></td>
+        <td style="color:var(--accent2);font-family:monospace">${escapeHtml(result.label)}</td>
+        <td style="font-family:monospace;font-size:.68rem;color:var(--muted2)">${escapeHtml(result.path)}</td>
+        <td><span class="${userDiffClass}">${escapeHtml(result.cur_user)}</span></td>
+        <td><span class="${groupDiffClass}">${escapeHtml(result.cur_group)}</span></td>
+        <td style="font-family:monospace"><span class="${modeDiffClass}">${escapeHtml(result.cur_mode)}</span></td>
+        <td style="color:var(--muted);font-size:.65rem">${escapeHtml(result.exp_user)}:${escapeHtml(result.exp_group)} ${escapeHtml(result.exp_mode)}</td>
+        <td id="perm-res-${index}"></td>
       </tr>`
     })
   })
 
-  el.innerHTML = `
+  container.innerHTML = `
   <table class="perm-table">
     <thead><tr>
-      <th><input type="checkbox" id="perm-all" onchange="toggleAllPerms(this)"></th>
+      <th><input type="checkbox" id="perm-all" onchange="toggleAllPermissions(this)"></th>
       <th>Status</th><th>Service</th><th>Path</th>
       <th>Owner</th><th>Group</th><th>Mode</th><th>Expected</th><th>Result</th>
     </tr></thead>
-    <tbody>${tbody}</tbody>
+    <tbody>${tableBody}</tbody>
   </table>
   <div class="perm-fix-row">
-    <span class="perm-sel-count" id="perm-sel-count">${bad.length} selected</span>
+    <span class="perm-sel-count" id="perm-sel-count">${mismatched.length} selected</span>
     <label>Owner<input type="text" id="fix-user" value="" placeholder="from expected"></label>
     <label>Group<input type="text" id="fix-group" value="media" placeholder="media"></label>
     <label>Mode<input type="text" id="fix-mode" value="774" placeholder="774"></label>
-    <button class="btn-save" onclick="applyPerms()">Apply to selected</button>
-    <button class="sm" onclick="selectMismatches()">Select all mismatches</button>
+    <button class="btn-save" onclick="applyPermissions()">Apply to selected</button>
+    <button class="sm" onclick="selectPermissionMismatches()">Select all mismatches</button>
     <div id="perm-apply-msg" style="font-size:.72rem"></div>
   </div>`
 }
 
-function toggleAllPerms(cb) {
-  document.querySelectorAll('.perm-cb').forEach((c) => (c.checked = cb.checked))
-  updateSelCount()
-}
-function selectMismatches() {
-  document.querySelectorAll('.perm-cb').forEach((c) => (c.checked = true))
-  updateSelCount()
-}
-function updateSelCount() {
-  const el = document.getElementById('perm-sel-count')
-  if (el) el.textContent = document.querySelectorAll('.perm-cb:checked').length + ' selected'
+function toggleAllPermissions(checkbox) {
+  document.querySelectorAll('.perm-cb').forEach((cb) => (cb.checked = checkbox.checked))
+  updateSelectedCount()
 }
 
-async function applyPerms() {
+function selectPermissionMismatches() {
+  document.querySelectorAll('.perm-cb').forEach((cb) => (cb.checked = true))
+  updateSelectedCount()
+}
+
+function updateSelectedCount() {
+  const countElement = document.getElementById('perm-sel-count')
+  if (countElement) countElement.textContent = document.querySelectorAll('.perm-cb:checked').length + ' selected'
+}
+
+async function applyPermissions() {
   const recursive = document.getElementById('perm-recursive').checked
-  const defUser = document.getElementById('fix-user').value.trim()
-  const defGroup = document.getElementById('fix-group').value.trim() || 'media'
-  const defMode = document.getElementById('fix-mode').value.trim() || '774'
-  const selected = [...document.querySelectorAll('.perm-cb:checked')].map((c) => parseInt(c.dataset.i))
-  if (!selected.length) {
+  const defaultUser = document.getElementById('fix-user').value.trim()
+  const defaultGroup = document.getElementById('fix-group').value.trim() || 'media'
+  const defaultMode = document.getElementById('fix-mode').value.trim() || '774'
+  const selectedIndices = [...document.querySelectorAll('.perm-cb:checked')].map((cb) => parseInt(cb.dataset.i))
+
+  if (!selectedIndices.length) {
     document.getElementById('perm-apply-msg').textContent = 'Nothing selected.'
     return
   }
-  const msg = document.getElementById('perm-apply-msg')
-  msg.textContent = `Applying to ${selected.length} path(s)…`
-  const fixes = selected.map((i) => {
-    const r = permScanData[i]
+
+  const messageElement = document.getElementById('perm-apply-msg')
+  messageElement.textContent = `Applying to ${selectedIndices.length} path(s)…`
+
+  const fixes = selectedIndices.map((index) => {
+    const result = permissionScanResults[index]
     return {
-      path: r.path,
-      user: defUser || r.exp_user,
-      group: defGroup || r.exp_group,
-      mode: defMode || r.exp_mode,
+      path: result.path,
+      user: defaultUser || result.exp_user,
+      group: defaultGroup || result.exp_group,
+      mode: defaultMode || result.exp_mode,
       recursive,
     }
   })
-  const d = await safeJson('/api/perms/fix', {
+
+  const data = await safeJson('/api/perms/fix', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fixes),
   })
-  if (!d) {
-    msg.textContent = 'Request failed.'
+
+  if (!data) {
+    messageElement.textContent = 'Request failed.'
     return
   }
-  let ok = 0,
-    fail = 0
-  for (const res of d.results || []) {
-    const i = permScanData.findIndex((r) => r.path === res.path)
-    const cell = document.getElementById('perm-res-' + i)
+
+  let successCount = 0
+  let failCount = 0
+  for (const fixResult of data.results || []) {
+    const index = permissionScanResults.findIndex((result) => result.path === fixResult.path)
+    const cell = document.getElementById('perm-res-' + index)
     if (cell) {
-      if (res.ok) {
+      if (fixResult.ok) {
         cell.innerHTML = '<span class="perm-ok">✓</span>'
-        ok++
+        successCount++
       } else {
-        cell.innerHTML = `<span class="perm-bad" title="${esc(res.error || '')}">✗</span>`
-        fail++
+        cell.innerHTML = `<span class="perm-bad" title="${escapeHtml(fixResult.error || '')}">✗</span>`
+        failCount++
       }
     }
   }
-  msg.textContent = `Done: ${ok} OK, ${fail} failed.`
-  if (ok > 0) setTimeout(runScan, 800)
+  messageElement.textContent = `Done: ${successCount} OK, ${failCount} failed.`
+  if (successCount > 0) setTimeout(runPermissionScan, 800)
 }
 
-// ── Errors tab ──
-let errorsData = [],
-  errorsLoaded = false
+// ── Errors Tab ──
+let errorsData = []
+let errorsLoaded = false
 
-function updateErrBadge(errors, warnings) {
-  const tab = document.getElementById('err-tab')
-  if (!tab) return
-  let badge = tab.querySelector('.tab-badge')
-  const total = errors + warnings
+function updateErrBadge(errorCount, warningCount) {
+  const tabElement = document.getElementById('err-tab')
+  if (!tabElement) return
+  let badge = tabElement.querySelector('.tab-badge')
+  const total = errorCount + warningCount
+
   if (total > 0) {
     if (!badge) {
       badge = document.createElement('span')
-      tab.appendChild(badge)
+      tabElement.appendChild(badge)
     }
-    badge.className = 'tab-badge' + (errors === 0 ? ' warn' : '')
+    badge.className = 'tab-badge' + (errorCount === 0 ? ' warn' : '')
     badge.textContent = total > 99 ? '99+' : total
   } else {
     if (badge) badge.remove()
@@ -1171,56 +1406,69 @@ function updateErrBadge(errors, warnings) {
 
 async function loadErrors() {
   errorsLoaded = true
-  const d = await safeJson('/api/errors')
-  if (!d) return
-  errorsData = d.errors || []
+  const data = await safeJson('/api/errors')
+  if (!data) return
+  errorsData = data.errors || []
+
   // Populate service filter
-  const svcs = [...new Set(errorsData.map((e) => e.sid))].sort()
-  const sel = document.getElementById('err-svc')
-  const cur = sel.value
-  sel.innerHTML =
+  const services = [...new Set(errorsData.map((entry) => entry.sid))].sort()
+  const serviceSelect = document.getElementById('err-svc')
+  const currentSelection = serviceSelect.value
+  serviceSelect.innerHTML =
     '<option value="">All services</option>' +
-    svcs.map((s) => `<option value="${esc(s)}"${s === cur ? ' selected' : ''}>${esc(s)}</option>`).join('')
+    services
+      .map(
+        (svc) =>
+          `<option value="${escapeHtml(svc)}"${svc === currentSelection ? ' selected' : ''}>${escapeHtml(svc)}</option>`,
+      )
+      .join('')
+
   // Meta info
-  const meta = document.getElementById('err-meta')
-  const errs = errorsData.filter((e) => e.severity === 'error').length
-  const warns = errorsData.filter((e) => e.severity === 'warning').length
-  if (d.last_scan) {
-    const ago = Math.round((Date.now() / 1000 - d.last_scan) / 60)
-    meta.textContent = `${errorsData.length} entries · scan #${d.scan_count} · ${ago < 1 ? 'just now' : ago + 'm ago'}`
+  const metaElement = document.getElementById('err-meta')
+  const errorCount = errorsData.filter((entry) => entry.severity === 'error').length
+  const warningCount = errorsData.filter((entry) => entry.severity === 'warning').length
+
+  if (data.last_scan) {
+    const minutesAgo = Math.round((Date.now() / 1000 - data.last_scan) / 60)
+    metaElement.textContent = `${errorsData.length} entries · scan #${data.scan_count} · ${minutesAgo < 1 ? 'just now' : minutesAgo + 'm ago'}`
   }
-  const summary = document.getElementById('err-summary')
-  summary.innerHTML =
-    errs || warns
-      ? `<span style="color:var(--err)">${errs} error${errs !== 1 ? 's' : ''}</span> · ` +
-        `<span style="color:var(--warn)">${warns} warning${warns !== 1 ? 's' : ''}</span>`
+
+  const summaryElement = document.getElementById('err-summary')
+  summaryElement.innerHTML =
+    errorCount || warningCount
+      ? `<span style="color:var(--err)">${errorCount} error${errorCount !== 1 ? 's' : ''}</span> · ` +
+        `<span style="color:var(--warn)">${warningCount} warning${warningCount !== 1 ? 's' : ''}</span>`
       : 'All clear'
-  updateErrBadge(errs, warns)
+
+  updateErrBadge(errorCount, warningCount)
   filterErrors()
 }
 
 function filterErrors() {
-  const svc = document.getElementById('err-svc').value
-  const sev = document.getElementById('err-sev').value
-  const sort = document.getElementById('err-sort')?.value || 'newest'
+  const serviceFilter = document.getElementById('err-svc').value
+  const severityFilter = document.getElementById('err-sev').value
+  const sortOrder = document.getElementById('err-sort')?.value || 'newest'
+
   let items = [...errorsData]
-  if (svc) items = items.filter((e) => e.sid === svc)
-  if (sev) items = items.filter((e) => e.severity === sev)
-  // Sort
-  if (sort === 'newest') items.reverse()
-  else if (sort === 'oldest') {
+  if (serviceFilter) items = items.filter((entry) => entry.sid === serviceFilter)
+  if (severityFilter) items = items.filter((entry) => entry.severity === severityFilter)
+
+  if (sortOrder === 'newest') items.reverse()
+  else if (sortOrder === 'oldest') {
     /* already oldest-first */
-  } else if (sort === 'count') items.sort((a, b) => (b.count || 1) - (a.count || 1))
-  else if (sort === 'svc') items.sort((a, b) => a.sid.localeCompare(b.sid))
-  const el = document.getElementById('err-list')
+  } else if (sortOrder === 'count') items.sort((a, b) => (b.count || 1) - (a.count || 1))
+  else if (sortOrder === 'svc') items.sort((a, b) => a.sid.localeCompare(b.sid))
+
+  const listElement = document.getElementById('err-list')
   if (!items.length) {
-    el.innerHTML =
+    listElement.innerHTML =
       '<div style="color:var(--muted);padding:.5rem;font-family:system-ui">No entries match the filter.</div>'
     return
   }
-  el.innerHTML = items
-    .map((e) => {
-      const ts = new Date(e.ts * 1000).toLocaleString('en-CA', {
+
+  listElement.innerHTML = items
+    .map((entry) => {
+      const timestamp = new Date(entry.ts * 1000).toLocaleString('en-CA', {
         timeZone: TZ,
         hour12: false,
         month: '2-digit',
@@ -1229,36 +1477,39 @@ function filterErrors() {
         minute: '2-digit',
         second: '2-digit',
       })
-      const cnt =
-        e.count && e.count > 1
-          ? `<span class="err-cnt${e.count > 5 ? ' hot' : ''}" title="${e.count} occurrences">×${e.count}</span>`
+
+      const countBadge =
+        entry.count && entry.count > 1
+          ? `<span class="err-cnt${entry.count > 5 ? ' hot' : ''}" title="${entry.count} occurrences">×${entry.count}</span>`
           : ''
-      const full = e.line.length > 180 ? e.line : ''
-      const short = e.line.length > 180 ? e.line.slice(0, 180) + '…' : e.line
+
+      const fullLine = entry.line.length > 180 ? entry.line : ''
+      const shortLine = entry.line.length > 180 ? entry.line.slice(0, 180) + '…' : entry.line
+
       return (
-        `<div class="err-row ${esc(e.severity)}" onclick="this.classList.toggle('expanded')">` +
-        `<span class="err-sev">${esc(e.severity)}</span>` +
-        `<span class="err-svc">${esc(e.sid)}</span>` +
-        `<span class="err-ts">${esc(ts)}</span>` +
-        `<span class="err-line">${esc(short)}</span>${cnt}</div>` +
-        (full ? `<div class="err-expand">${esc(full)}</div>` : '')
+        `<div class="err-row ${escapeHtml(entry.severity)}" onclick="this.classList.toggle('expanded')">` +
+        `<span class="err-sev">${escapeHtml(entry.severity)}</span>` +
+        `<span class="err-svc">${escapeHtml(entry.sid)}</span>` +
+        `<span class="err-ts">${escapeHtml(timestamp)}</span>` +
+        `<span class="err-line">${escapeHtml(shortLine)}</span>${countBadge}</div>` +
+        (fullLine ? `<div class="err-expand">${escapeHtml(fullLine)}</div>` : '')
       )
     })
     .join('')
 }
 
-async function scanNow() {
-  const btns = document.querySelectorAll('#p-e button.sm')
-  const btn = btns[0]
-  if (btn) {
-    btn.disabled = true
-    btn.textContent = 'Scanning…'
+async function scanErrorsNow() {
+  const buttons = document.querySelectorAll('#p-e button.sm')
+  const scanButton = buttons[0]
+  if (scanButton) {
+    scanButton.disabled = true
+    scanButton.textContent = 'Scanning…'
   }
   await safeJson('/api/errors/scan', { method: 'POST' })
   await loadErrors()
-  if (btn) {
-    btn.disabled = false
-    btn.textContent = '⟳ Scan now'
+  if (scanButton) {
+    scanButton.disabled = false
+    scanButton.textContent = '⟳ Scan now'
   }
 }
 
@@ -1273,194 +1524,213 @@ async function clearErrors() {
 }
 
 // ── Service Modal ──
-let modalSid = null,
-  modalUnit = null,
-  modalLogTimer = null,
-  _modalLogLines = []
+let modalServiceId = null
+let modalServiceUnit = null
+let modalLogRefreshTimer = null
+let modalLogLines = []
 
-function openModal(sid, tab = 'overview') {
-  const s = statusData[sid]
-  if (!s) return
-  const st = statsData[sid] || {}
-  const cur = s.current
-  modalSid = sid
-  modalUnit = cur.unit || ''
+function openServiceModal(serviceId, tabName = 'overview') {
+  const serviceData = statusData[serviceId]
+  if (!serviceData) return
+  const serviceStats = statsData[serviceId] || {}
+  const current = serviceData.current
+  modalServiceId = serviceId
+  modalServiceUnit = current.unit || ''
 
   // Header
-  document.getElementById('modal-name').textContent = cur.name
-  const cls = cur.ok === null ? 'pend' : cur.ok ? 'up' : 'dn'
+  document.getElementById('modal-name').textContent = current.name
   const sysBadge = document.getElementById('modal-badge-sys')
-  sysBadge.className = `sbadge ${cur.systemd_ok ? 'sys-up' : 'sys-dn'}`
-  sysBadge.title = 'systemd: ' + (cur.systemd || 'unknown')
+  sysBadge.className = `sbadge ${current.systemd_ok ? 'sys-up' : 'sys-dn'}`
+  sysBadge.title = 'systemd: ' + (current.systemd || 'unknown')
+
   const httpBadge = document.getElementById('modal-badge-http')
-  if (cur.http_ok === null || cur.http_ok === undefined) {
+  if (current.http_ok === null || current.http_ok === undefined) {
     httpBadge.style.display = 'none'
   } else {
     httpBadge.style.display = ''
-    httpBadge.className = `sbadge ${cur.http_ok ? 'http-up' : 'http-dn'}`
-    httpBadge.title = cur.message || ''
+    httpBadge.className = `sbadge ${current.http_ok ? 'http-up' : 'http-dn'}`
+    httpBadge.title = current.message || ''
   }
-  const latEl = document.getElementById('modal-lat')
-  latEl.textContent = cur.latency_ms != null ? cur.latency_ms + 'ms' : ''
+
+  const latencyElement = document.getElementById('modal-lat')
+  latencyElement.textContent = current.latency_ms != null ? current.latency_ms + 'ms' : ''
 
   // Web URL
-  const webUrl = WEB_URLS[sid] || ''
-  const urlEl = document.getElementById('modal-weburl')
+  const webUrl = WEB_URLS[serviceId] || ''
+  const urlLink = document.getElementById('modal-weburl')
   if (webUrl) {
-    urlEl.href = webUrl
-    urlEl.style.display = ''
+    urlLink.href = webUrl
+    urlLink.style.display = ''
   } else {
-    urlEl.style.display = 'none'
+    urlLink.style.display = 'none'
   }
 
   // Meta
-  document.getElementById('modal-msg').textContent = cur.message || '—'
-  document.getElementById('modal-unit').textContent = cur.unit ? `unit: ${cur.unit}` : ''
-  const tsEl = document.getElementById('modal-ts')
-  if (cur.timestamp)
-    tsEl.textContent = new Date(cur.timestamp).toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
+  document.getElementById('modal-msg').textContent = current.message || '—'
+  document.getElementById('modal-unit').textContent = current.unit ? `unit: ${current.unit}` : ''
+  const timestampElement = document.getElementById('modal-ts')
+  if (current.timestamp) {
+    timestampElement.textContent = new Date(current.timestamp).toLocaleTimeString('en-CA', {
+      timeZone: TZ,
+      hour12: false,
+    })
+  }
 
   // Overview
-  const statsHtml = renderStats(sid, st)
+  const statsHtml = renderStats(serviceId, serviceStats)
   document.getElementById('modal-stats-body').innerHTML =
     statsHtml || '<div style="color:var(--muted);font-size:.78rem">No stats collected yet.</div>'
-  const installed = st.version || st.addon_version || st.bazarr_version || ''
-  document.getElementById('modal-version-body').innerHTML = renderVersion(sid, installed)
-  document.getElementById('modal-history-body').innerHTML = s.history?.length
-    ? `<div style="font-size:.6rem;color:var(--muted);margin-bottom:.2rem">Uptime history (last ${s.history.length} checks)</div><div class="bar" style="margin:0">${bar(s.history)}</div>`
+
+  const installed = serviceStats.version || serviceStats.addon_version || serviceStats.bazarr_version || ''
+  document.getElementById('modal-version-body').innerHTML = renderVersion(serviceId, installed)
+  document.getElementById('modal-history-body').innerHTML = serviceData.history?.length
+    ? `<div style="font-size:.6rem;color:var(--muted);margin-bottom:.2rem">Uptime history (last ${serviceData.history.length} checks)</div><div class="bar" style="margin:0">${renderHistoryBar(serviceData.history)}</div>`
     : ''
 
   // Controls: web button
-  const cwBtn = document.getElementById('ctrl-open-web')
+  const openWebButton = document.getElementById('ctrl-open-web')
   if (webUrl) {
-    cwBtn.style.display = ''
-    cwBtn.onclick = () => window.open(webUrl, '_blank')
+    openWebButton.style.display = ''
+    openWebButton.onclick = () => window.open(webUrl, '_blank')
   } else {
-    cwBtn.style.display = 'none'
+    openWebButton.style.display = 'none'
   }
   document.getElementById('ctrl-output').textContent = 'Action output will appear here.'
   document.getElementById('ctrl-output').style.color = 'var(--muted)'
 
   // System info panel in controls
-  const sysinfo = document.getElementById('ctrl-sysinfo')
-  sysinfo.innerHTML = cur.unit
+  const sysinfoElement = document.getElementById('ctrl-sysinfo')
+  sysinfoElement.innerHTML = current.unit
     ? [
-        sysR('Unit', cur.unit),
-        sysR('Systemd', cur.systemd, cur.systemd === 'active' ? 'ok' : cur.systemd === 'inactive' ? 'err' : ''),
-        sysR('Status', cur.ok ? 'Healthy' : 'Unhealthy', cur.ok ? 'ok' : 'err'),
-        cur.latency_ms != null ? sysR('Latency', cur.latency_ms + 'ms') : '',
+        systemRow('Unit', current.unit),
+        systemRow(
+          'Systemd',
+          current.systemd,
+          current.systemd === 'active' ? 'ok' : current.systemd === 'inactive' ? 'err' : '',
+        ),
+        systemRow('Status', current.ok ? 'Healthy' : 'Unhealthy', current.ok ? 'ok' : 'err'),
+        current.latency_ms != null ? systemRow('Latency', current.latency_ms + 'ms') : '',
       ].join('')
     : ''
 
   // Show modal, open correct tab
   document.getElementById('svc-modal').classList.add('open')
   document.body.style.overflow = 'hidden'
-  openMTab(tab, document.querySelector(`.mtab[onclick*="'${tab}'"]`) || document.querySelector('.mtab'))
+  openModalTab(tabName, document.querySelector(`.mtab[onclick*="'${tabName}'"]`) || document.querySelector('.mtab'))
 }
 
 function closeModal() {
   document.getElementById('svc-modal').classList.remove('open')
   document.body.style.overflow = ''
-  if (modalLogTimer) {
-    clearInterval(modalLogTimer)
-    modalLogTimer = null
+  if (modalLogRefreshTimer) {
+    clearInterval(modalLogRefreshTimer)
+    modalLogRefreshTimer = null
   }
-  _modalLogLines = []
-  modalSid = null
-  modalUnit = null
+  modalLogLines = []
+  modalServiceId = null
+  modalServiceUnit = null
 }
 
-function openMTab(name, el) {
-  document.querySelectorAll('.mtab').forEach((t) => t.classList.remove('active'))
-  if (el) el.classList.add('active')
-  document.querySelectorAll('.mpanel').forEach((p) => p.classList.remove('active'))
-  document.getElementById('mt-' + name).classList.add('active')
-  if (name === 'logs') {
-    if (modalLogTimer) {
-      clearInterval(modalLogTimer)
-      modalLogTimer = null
+function openModalTab(tabName, tabElement) {
+  document.querySelectorAll('.mtab').forEach((tab) => tab.classList.remove('active'))
+  if (tabElement) tabElement.classList.add('active')
+  document.querySelectorAll('.mpanel').forEach((panel) => panel.classList.remove('active'))
+  document.getElementById('mt-' + tabName).classList.add('active')
+
+  if (tabName === 'logs') {
+    if (modalLogRefreshTimer) {
+      clearInterval(modalLogRefreshTimer)
+      modalLogRefreshTimer = null
     }
     modalFetchLogs()
-    modalLogTimer = setInterval(modalFetchLogs, 5000)
+    modalLogRefreshTimer = setInterval(modalFetchLogs, 5000)
   } else {
-    if (modalLogTimer) {
-      clearInterval(modalLogTimer)
-      modalLogTimer = null
+    if (modalLogRefreshTimer) {
+      clearInterval(modalLogRefreshTimer)
+      modalLogRefreshTimer = null
     }
   }
 }
 
 async function modalFetchLogs() {
-  if (!modalUnit) return
-  const n = document.getElementById('modal-log-lines')?.value || '200'
-  const box = document.getElementById('modal-logbox')
-  const st = document.getElementById('modal-log-status')
-  const d = await safeJson('/api/logs/' + encodeURIComponent(modalUnit) + '?n=' + n)
-  if (!d) {
-    box.innerHTML = '<span style="color:var(--err)">Error fetching logs.</span>'
+  if (!modalServiceUnit) return
+  const lineCount = document.getElementById('modal-log-lines')?.value || '200'
+  const logBox = document.getElementById('modal-logbox')
+  const statusLabel = document.getElementById('modal-log-status')
+
+  const data = await safeJson('/api/logs/' + encodeURIComponent(modalServiceUnit) + '?n=' + lineCount)
+  if (!data) {
+    logBox.innerHTML = '<span style="color:var(--err)">Error fetching logs.</span>'
     return
   }
-  if (d.error) {
-    box.innerHTML = `<span style="color:var(--err)">${esc(d.error)}</span>`
+  if (data.error) {
+    logBox.innerHTML = `<span style="color:var(--err)">${escapeHtml(data.error)}</span>`
     return
   }
-  _modalLogLines = d.lines || []
+
+  modalLogLines = data.lines || []
   modalFilterLogs()
-  st.textContent =
-    `${_modalLogLines.length} lines · ` + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
+  statusLabel.textContent =
+    `${modalLogLines.length} lines · ` + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
 }
 
 function modalFilterLogs() {
-  const box = document.getElementById('modal-logbox')
-  if (!_modalLogLines.length) {
-    box.innerHTML = '<span style="color:var(--muted)">No logs.</span>'
+  const logBox = document.getElementById('modal-logbox')
+  if (!modalLogLines.length) {
+    logBox.innerHTML = '<span style="color:var(--muted)">No logs.</span>'
     return
   }
-  const q = (document.getElementById('modal-log-search')?.value || '').toLowerCase()
-  const lines = q ? _modalLogLines.filter((l) => l.toLowerCase().includes(q)) : _modalLogLines
-  if (!lines.length) {
-    box.innerHTML = '<span style="color:var(--muted)">No lines match filter.</span>'
+
+  const query = (document.getElementById('modal-log-search')?.value || '').toLowerCase()
+  const filteredLines = query ? modalLogLines.filter((line) => line.toLowerCase().includes(query)) : modalLogLines
+
+  if (!filteredLines.length) {
+    logBox.innerHTML = '<span style="color:var(--muted)">No lines match filter.</span>'
     return
   }
-  const atBot = box.scrollHeight - box.scrollTop - box.clientHeight < 60
-  box.innerHTML = lines
+
+  const isNearBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 60
+  logBox.innerHTML = filteredLines
     .map(
-      (l) =>
-        `<span class="${/error|critical|fail|exception/i.test(l) ? 'le' : /warn/i.test(l) ? 'lw' : ''}">${esc(l)}</span>`,
+      (line) =>
+        `<span class="${/error|critical|fail|exception/i.test(line) ? 'le' : /warn/i.test(line) ? 'lw' : ''}">${escapeHtml(line)}</span>`,
     )
     .join('\n')
-  if (atBot) box.scrollTop = box.scrollHeight
+  if (isNearBottom) logBox.scrollTop = logBox.scrollHeight
 }
 
-async function svcAction(action) {
-  if (!modalUnit) return
-  const out = document.getElementById('ctrl-output')
-  const btns = document.querySelectorAll('.ctrl-btn')
-  btns.forEach((b) => {
-    b.disabled = true
+async function serviceAction(action) {
+  if (!modalServiceUnit) return
+  const outputElement = document.getElementById('ctrl-output')
+  const buttons = document.querySelectorAll('.ctrl-btn')
+  buttons.forEach((button) => {
+    button.disabled = true
   })
-  out.style.color = 'var(--muted)'
-  out.textContent = `${action}ing ${modalUnit}…`
-  const r = await safeJson(`/api/service/${encodeURIComponent(modalUnit)}/${action}`, { method: 'POST' })
-  btns.forEach((b) => {
-    b.disabled = false
+  outputElement.style.color = 'var(--muted)'
+  outputElement.textContent = `${action}ing ${modalServiceUnit}…`
+
+  const result = await safeJson(`/api/service/${encodeURIComponent(modalServiceUnit)}/${action}`, { method: 'POST' })
+
+  buttons.forEach((button) => {
+    button.disabled = false
   })
-  if (r?.ok) {
-    out.style.color = 'var(--ok)'
-    out.textContent = `✓ ${action} succeeded`
+  if (result?.ok) {
+    outputElement.style.color = 'var(--ok)'
+    outputElement.textContent = `✓ ${action} succeeded`
     setTimeout(() => refresh(), 2000)
   } else {
-    out.style.color = 'var(--err)'
-    out.textContent = `✗ ${action} failed: ${r?.error || 'unknown error'}`
+    outputElement.style.color = 'var(--err)'
+    outputElement.textContent = `✗ ${action} failed: ${result?.error || 'unknown error'}`
   }
 }
 
-async function quickRestart(sid) {
-  const s = statusData[sid]
-  if (!s) return
-  const unit = s.current.unit
+async function quickRestartService(serviceId) {
+  const serviceData = statusData[serviceId]
+  if (!serviceData) return
+  const unit = serviceData.current.unit
   if (!unit) return
-  const card = document.getElementById('card-' + sid)
+
+  const card = document.getElementById('card-' + serviceId)
   if (card) {
     card.style.opacity = '.5'
     card.style.pointerEvents = 'none'
@@ -1473,54 +1743,62 @@ async function quickRestart(sid) {
   setTimeout(() => refresh(), 2000)
 }
 
-function openServiceWeb() {
-  const url = WEB_URLS[modalSid]
+function openServiceWebUI() {
+  const url = WEB_URLS[modalServiceId]
   if (url) window.open(url, '_blank')
 }
 
 // ── Keyboard: Escape closes modal ──
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeModal()
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeModal()
 })
 
-// ── Jellyfin tab ──
-let jfLoaded = false
+// ── Jellyfin Tab ──
+let jellyfinLoaded = false
+
 async function loadJellyfin() {
-  const d = await safeJson('/api/jellyfin')
-  if (!d) return
-  jfLoaded = true
-  const meta = document.getElementById('jf-meta')
-  meta.textContent = 'Updated: ' + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
+  const data = await safeJson('/api/jellyfin')
+  if (!data) return
+  jellyfinLoaded = true
+
+  const metaElement = document.getElementById('jf-meta')
+  metaElement.textContent = 'Updated: ' + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
+
   // Sessions
-  const sesEl = document.getElementById('jf-sessions')
-  const sessions = d.sessions || []
-  const active = sessions.filter((s) => s.NowPlayingItem)
-  let sh = '<h3>Active Sessions (' + sessions.length + ')</h3>'
-  if (!sessions.length) sh += '<div style="color:var(--muted);font-size:.78rem">No active sessions</div>'
-  else {
-    for (const s of sessions) {
-      const user = s.UserName || 'Unknown'
-      const client = s.Client || ''
-      const device = s.DeviceName || ''
-      const np = s.NowPlayingItem
-      const playing = np
-        ? `<span style="color:var(--ok)">&#x25B6; ${esc(np.Name || '')}${np.SeriesName ? ' (' + esc(np.SeriesName) + ')' : ''}</span>`
+  const sessionsContainer = document.getElementById('jf-sessions')
+  const sessions = data.sessions || []
+  const activeSessions = sessions.filter((session) => session.NowPlayingItem)
+
+  let sessionsHtml = '<h3>Active Sessions (' + sessions.length + ')</h3>'
+  if (!sessions.length) {
+    sessionsHtml += '<div style="color:var(--muted);font-size:.78rem">No active sessions</div>'
+  } else {
+    for (const session of sessions) {
+      const userName = session.UserName || 'Unknown'
+      const clientName = session.Client || ''
+      const deviceName = session.DeviceName || ''
+      const nowPlaying = session.NowPlayingItem
+      const playingHtml = nowPlaying
+        ? `<span style="color:var(--ok)">&#x25B6; ${escapeHtml(nowPlaying.Name || '')}${nowPlaying.SeriesName ? ' (' + escapeHtml(nowPlaying.SeriesName) + ')' : ''}</span>`
         : '<span style="color:var(--muted)">Idle</span>'
-      sh += `<div style="padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.75rem">
-        <div style="display:flex;gap:.5rem;align-items:center"><strong style="color:var(--accent2)">${esc(user)}</strong><span style="color:var(--muted)">${esc(client)} / ${esc(device)}</span></div>
-        <div style="margin-top:.15rem">${playing}</div></div>`
+      sessionsHtml += `<div style="padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.75rem">
+        <div style="display:flex;gap:.5rem;align-items:center"><strong style="color:var(--accent2)">${escapeHtml(userName)}</strong><span style="color:var(--muted)">${escapeHtml(clientName)} / ${escapeHtml(deviceName)}</span></div>
+        <div style="margin-top:.15rem">${playingHtml}</div></div>`
     }
   }
-  sesEl.innerHTML = sh
+  sessionsContainer.innerHTML = sessionsHtml
+
   // Activity
-  const actEl = document.getElementById('jf-activity')
-  const activity = d.activity || []
-  let ah = '<h3>Recent Activity (' + activity.length + ')</h3>'
-  if (!activity.length) ah += '<div style="color:var(--muted);font-size:.78rem">No recent activity</div>'
-  else {
-    for (const a of activity.slice(0, 30)) {
-      const ts = a.Date
-        ? new Date(a.Date).toLocaleString('en-CA', {
+  const activityContainer = document.getElementById('jf-activity')
+  const activity = data.activity || []
+
+  let activityHtml = '<h3>Recent Activity (' + activity.length + ')</h3>'
+  if (!activity.length) {
+    activityHtml += '<div style="color:var(--muted);font-size:.78rem">No recent activity</div>'
+  } else {
+    for (const entry of activity.slice(0, 30)) {
+      const timestamp = entry.Date
+        ? new Date(entry.Date).toLocaleString('en-CA', {
             timeZone: TZ,
             hour12: false,
             month: '2-digit',
@@ -1529,23 +1807,24 @@ async function loadJellyfin() {
             minute: '2-digit',
           })
         : ''
-      const sev = a.Severity === 'Error' ? 'err' : a.Severity === 'Warning' ? 'warn' : 'muted'
-      ah += `<div style="padding:.25rem 0;border-bottom:1px solid var(--border);font-size:.7rem;display:flex;gap:.5rem">
-        <span style="color:var(--muted);min-width:90px;flex-shrink:0">${esc(ts)}</span>
-        <span style="color:var(--${sev})">${esc(a.Name || a.Type || '')}</span>
-        <span style="color:var(--muted2);margin-left:auto">${esc(a.ShortOverview || '').slice(0, 80)}</span></div>`
+      const severityColor = entry.Severity === 'Error' ? 'err' : entry.Severity === 'Warning' ? 'warn' : 'muted'
+      activityHtml += `<div style="padding:.25rem 0;border-bottom:1px solid var(--border);font-size:.7rem;display:flex;gap:.5rem">
+        <span style="color:var(--muted);min-width:90px;flex-shrink:0">${escapeHtml(timestamp)}</span>
+        <span style="color:var(--${severityColor})">${escapeHtml(entry.Name || entry.Type || '')}</span>
+        <span style="color:var(--muted2);margin-left:auto">${escapeHtml(entry.ShortOverview || '').slice(0, 80)}</span></div>`
     }
   }
-  actEl.innerHTML = ah
+  activityContainer.innerHTML = activityHtml
 }
 
-// ── Benchmark tab ──
-let benchInited = false
-function initBench() {
-  if (benchInited) return
-  benchInited = true
-  const sel = document.getElementById('bench-title')
-  // Group titles
+// ── Benchmark Tab ──
+let benchmarkInitialized = false
+
+function initBenchmark() {
+  if (benchmarkInitialized) return
+  benchmarkInitialized = true
+
+  const titleSelect = document.getElementById('bench-title')
   const groups = {
     'Popular Movies': [],
     'Niche Movies': [],
@@ -1555,9 +1834,11 @@ function initBench() {
     'Niche Anime': [],
     'TV Episodes': [],
   }
-  for (const [id, name] of Object.entries(BENCH_TITLES)) {
-    if (id.includes(':')) groups['TV Episodes'].push([id, name])
-    else if (
+
+  for (const [imdbId, name] of Object.entries(BENCH_TITLES)) {
+    if (imdbId.includes(':')) {
+      groups['TV Episodes'].push([imdbId, name])
+    } else if (
       [
         'tt0468569',
         'tt1375666',
@@ -1567,134 +1848,167 @@ function initBench() {
         'tt6718170',
         'tt1517268',
         'tt9362722',
-      ].includes(id)
-    )
-      groups['Popular Movies'].push([id, name])
-    else if (['tt0118799', 'tt0087843', 'tt0347149', 'tt6751668', 'tt5311514'].includes(id))
-      groups['Niche Movies'].push([id, name])
-    else if (['tt0903747', 'tt0944947', 'tt2861424', 'tt7366338', 'tt11280740'].includes(id))
-      groups['Popular TV'].push([id, name])
-    else if (['tt2085059', 'tt0306414', 'tt5491994'].includes(id)) groups['Niche TV'].push([id, name])
-    else if (['tt0388629', 'tt0877057', 'tt0434706', 'tt10919420', 'tt5370118'].includes(id))
-      groups['Popular Anime'].push([id, name])
-    else groups['Niche Anime'].push([id, name])
-  }
-  for (const [g, items] of Object.entries(groups)) {
-    if (!items.length) continue
-    const og = document.createElement('optgroup')
-    og.label = g
-    for (const [id, name] of items) {
-      const o = document.createElement('option')
-      o.value = id
-      o.textContent = name + ' (' + id.split(':')[0] + ')'
-      og.appendChild(o)
+      ].includes(imdbId)
+    ) {
+      groups['Popular Movies'].push([imdbId, name])
+    } else if (['tt0118799', 'tt0087843', 'tt0347149', 'tt6751668', 'tt5311514'].includes(imdbId)) {
+      groups['Niche Movies'].push([imdbId, name])
+    } else if (['tt0903747', 'tt0944947', 'tt2861424', 'tt7366338', 'tt11280740'].includes(imdbId)) {
+      groups['Popular TV'].push([imdbId, name])
+    } else if (['tt2085059', 'tt0306414', 'tt5491994'].includes(imdbId)) {
+      groups['Niche TV'].push([imdbId, name])
+    } else if (['tt0388629', 'tt0877057', 'tt0434706', 'tt10919420', 'tt5370118'].includes(imdbId)) {
+      groups['Popular Anime'].push([imdbId, name])
+    } else {
+      groups['Niche Anime'].push([imdbId, name])
     }
-    sel.appendChild(og)
+  }
+
+  for (const [groupLabel, items] of Object.entries(groups)) {
+    if (!items.length) continue
+    const optgroup = document.createElement('optgroup')
+    optgroup.label = groupLabel
+    for (const [imdbId, name] of items) {
+      const option = document.createElement('option')
+      option.value = imdbId
+      option.textContent = name + ' (' + imdbId.split(':')[0] + ')'
+      optgroup.appendChild(option)
+    }
+    titleSelect.appendChild(optgroup)
   }
 }
 
-async function runBench() {
-  const imdb = document.getElementById('bench-title').value
-  if (!imdb) {
+async function runBenchmark() {
+  const imdbId = document.getElementById('bench-title').value
+  if (!imdbId) {
     document.getElementById('bench-status').textContent = 'Select a title first'
     return
   }
-  const btn = document.getElementById('bench-run-btn')
-  const status = document.getElementById('bench-status')
-  btn.disabled = true
-  status.textContent = 'Running benchmark for ' + BENCH_TITLES[imdb] + '...'
-  const d = await safeJson('/api/benchmark?imdb=' + encodeURIComponent(imdb))
-  btn.disabled = false
-  if (!d) {
-    status.textContent = 'Benchmark failed'
+
+  const runButton = document.getElementById('bench-run-btn')
+  const statusLabel = document.getElementById('bench-status')
+  runButton.disabled = true
+  statusLabel.textContent = 'Running benchmark for ' + BENCH_TITLES[imdbId] + '...'
+
+  const data = await safeJson('/api/benchmark?imdb=' + encodeURIComponent(imdbId))
+  runButton.disabled = false
+
+  if (!data) {
+    statusLabel.textContent = 'Benchmark failed'
     return
   }
-  status.textContent = 'Done — ' + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
-  renderBenchTable(d)
+  statusLabel.textContent = 'Done — ' + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
+  renderBenchTable(data)
 }
 
-async function runAllBench() {
-  const status = document.getElementById('bench-status')
-  const el = document.getElementById('bench-results')
+async function runAllBenchmarks() {
+  const statusLabel = document.getElementById('bench-status')
+  const container = document.getElementById('bench-results')
   const titles = Object.entries(BENCH_TITLES)
-  status.textContent = 'Running all ' + titles.length + ' benchmarks (this takes a while)...'
-  el.innerHTML = ''
-  let i = 0
-  for (const [imdb, name] of titles) {
-    i++
-    status.textContent = `[${i}/${titles.length}] ${name}...`
-    const d = await safeJson('/api/benchmark?imdb=' + encodeURIComponent(imdb))
-    if (d) renderBenchTable(d, true)
+  statusLabel.textContent = 'Running all ' + titles.length + ' benchmarks (this takes a while)...'
+  container.innerHTML = ''
+
+  let progress = 0
+  for (const [imdbId, name] of titles) {
+    progress++
+    statusLabel.textContent = `[${progress}/${titles.length}] ${name}...`
+    const data = await safeJson('/api/benchmark?imdb=' + encodeURIComponent(imdbId))
+    if (data) renderBenchTable(data, true)
   }
-  status.textContent = 'All ' + titles.length + ' benchmarks complete'
+  statusLabel.textContent = 'All ' + titles.length + ' benchmarks complete'
 }
 
-function renderBenchTable(d, append) {
-  const el = document.getElementById('bench-results')
-  const sum = d.summary || {}
-  const sh = sum.self_hosted || {}
-  const pub = sum.public || {}
-  let h = `<div style="margin-bottom:1.2rem;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.85rem;overflow-x:auto">`
-  h += `<div style="display:flex;gap:.8rem;align-items:center;margin-bottom:.6rem;flex-wrap:wrap">`
-  h += `<strong style="color:var(--accent2);font-size:.88rem">${esc(d.title)}</strong>`
-  h += `<code style="font-size:.68rem">${esc(d.imdb)}</code>`
-  h += `<span style="font-size:.68rem;color:var(--muted);margin-left:auto">${new Date(d.timestamp).toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })}</span>`
-  h += `</div>`
+function renderBenchTable(data, append) {
+  const container = document.getElementById('bench-results')
+  const summary = data.summary || {}
+  const selfHosted = summary.self_hosted || {}
+  const publicStats = summary.public || {}
+
+  const thStyle = 'text-align:left;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase'
+  const thStyleRight =
+    'text-align:right;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase'
+
+  let html = `<div style="margin-bottom:1.2rem;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.85rem;overflow-x:auto">`
+
+  // Title row
+  html += `<div style="display:flex;gap:.8rem;align-items:center;margin-bottom:.6rem;flex-wrap:wrap">`
+  html += `<strong style="color:var(--accent2);font-size:.88rem">${escapeHtml(data.title)}</strong>`
+  html += `<code style="font-size:.68rem">${escapeHtml(data.imdb)}</code>`
+  html += `<span style="font-size:.68rem;color:var(--muted);margin-left:auto">${new Date(data.timestamp).toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })}</span>`
+  html += `</div>`
+
   // Summary row
-  h += `<div style="display:flex;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap">`
-  h += `<div style="font-size:.72rem;padding:.3rem .6rem;background:var(--ok-bg);border-radius:6px;border:1px solid #065f46">Self-hosted: <strong style="color:var(--ok)">${sh.total_streams || 0}</strong> streams, avg <strong style="color:var(--ok)">${sh.avg_latency_ms || '—'}</strong>ms</div>`
-  h += `<div style="font-size:.72rem;padding:.3rem .6rem;background:#12232a;border-radius:6px;border:1px solid #164e63">Public: <strong style="color:#67e8f9">${pub.total_streams || 0}</strong> streams, avg <strong style="color:#67e8f9">${pub.avg_latency_ms || '—'}</strong>ms</div>`
-  h += `</div>`
+  html += `<div style="display:flex;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap">`
+  html += `<div style="font-size:.72rem;padding:.3rem .6rem;background:var(--ok-bg);border-radius:6px;border:1px solid #065f46">Self-hosted: <strong style="color:var(--ok)">${selfHosted.total_streams || 0}</strong> streams, avg <strong style="color:var(--ok)">${selfHosted.avg_latency_ms || '—'}</strong>ms</div>`
+  html += `<div style="font-size:.72rem;padding:.3rem .6rem;background:#12232a;border-radius:6px;border:1px solid #164e63">Public: <strong style="color:#67e8f9">${publicStats.total_streams || 0}</strong> streams, avg <strong style="color:#67e8f9">${publicStats.avg_latency_ms || '—'}</strong>ms</div>`
+  html += `</div>`
+
   // Table
-  h += `<table style="width:100%;border-collapse:collapse;font-size:.72rem"><thead><tr style="border-bottom:1px solid var(--border)">`
-  h += `<th style="text-align:left;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase">Name</th>`
-  h += `<th style="text-align:left;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase">Group</th>`
-  h += `<th style="text-align:right;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase">Latency</th>`
-  h += `<th style="text-align:right;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase">Streams</th>`
-  h += `<th style="text-align:right;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase">4K</th>`
-  h += `<th style="text-align:right;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase">1080p</th>`
-  h += `<th style="text-align:right;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase">720p</th>`
-  h += `<th style="text-align:left;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase">Codec</th>`
-  h += `<th style="text-align:left;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase">Status</th>`
-  h += `</tr></thead><tbody>`
-  for (const r of d.results || []) {
-    const grpCls = r.group === 'self-hosted' ? 'ok' : ''
-    const latCls = r.latency_ms != null ? (r.latency_ms < 2000 ? 'ok' : r.latency_ms < 5000 ? 'warn' : 'err') : 'muted'
-    const res = r.resolutions || {}
-    h += `<tr style="border-bottom:1px solid #13172a">`
-    h += `<td style="padding:.25rem .4rem;color:#e2e8f0;font-weight:600">${esc(r.name)}</td>`
-    h += `<td style="padding:.25rem .4rem;color:var(--${grpCls || 'accent2'})">${esc(r.group)}</td>`
-    h += `<td style="padding:.25rem .4rem;text-align:right;color:var(--${latCls})">${r.latency_ms != null ? r.latency_ms + 'ms' : '—'}</td>`
-    h += `<td style="padding:.25rem .4rem;text-align:right;color:var(--accent2);font-weight:700">${r.streams || 0}</td>`
-    h += `<td style="padding:.25rem .4rem;text-align:right">${res['4k'] || 0}</td>`
-    h += `<td style="padding:.25rem .4rem;text-align:right">${res['1080p'] || 0}</td>`
-    h += `<td style="padding:.25rem .4rem;text-align:right">${res['720p'] || 0}</td>`
-    h += `<td style="padding:.25rem .4rem">${esc(r.top_codec || '—')}</td>`
-    h += `<td style="padding:.25rem .4rem;color:var(--${r.error ? 'err' : 'ok'})">${r.error ? esc(r.error) : 'OK'}</td>`
-    h += `</tr>`
+  html += `<table style="width:100%;border-collapse:collapse;font-size:.72rem"><thead><tr style="border-bottom:1px solid var(--border)">`
+  html += `<th style="${thStyle}">Name</th>`
+  html += `<th style="${thStyle}">Group</th>`
+  html += `<th style="${thStyleRight}">Latency</th>`
+  html += `<th style="${thStyleRight}">Streams</th>`
+  html += `<th style="${thStyleRight}">4K</th>`
+  html += `<th style="${thStyleRight}">1080p</th>`
+  html += `<th style="${thStyleRight}">720p</th>`
+  html += `<th style="${thStyle}">Codec</th>`
+  html += `<th style="${thStyle}">Status</th>`
+  html += `</tr></thead><tbody>`
+
+  for (const result of data.results || []) {
+    const groupColor = result.group === 'self-hosted' ? 'ok' : ''
+    const latencyColor =
+      result.latency_ms != null
+        ? result.latency_ms < 2000
+          ? 'ok'
+          : result.latency_ms < 5000
+            ? 'warn'
+            : 'err'
+        : 'muted'
+    const resolutions = result.resolutions || {}
+    const cellStyle = 'padding:.25rem .4rem'
+
+    html += `<tr style="border-bottom:1px solid #13172a">`
+    html += `<td style="${cellStyle};color:#e2e8f0;font-weight:600">${escapeHtml(result.name)}</td>`
+    html += `<td style="${cellStyle};color:var(--${groupColor || 'accent2'})">${escapeHtml(result.group)}</td>`
+    html += `<td style="${cellStyle};text-align:right;color:var(--${latencyColor})">${result.latency_ms != null ? result.latency_ms + 'ms' : '—'}</td>`
+    html += `<td style="${cellStyle};text-align:right;color:var(--accent2);font-weight:700">${result.streams || 0}</td>`
+    html += `<td style="${cellStyle};text-align:right">${resolutions['4k'] || 0}</td>`
+    html += `<td style="${cellStyle};text-align:right">${resolutions['1080p'] || 0}</td>`
+    html += `<td style="${cellStyle};text-align:right">${resolutions['720p'] || 0}</td>`
+    html += `<td style="${cellStyle}">${escapeHtml(result.top_codec || '—')}</td>`
+    html += `<td style="${cellStyle};color:var(--${result.error ? 'err' : 'ok'})">${result.error ? escapeHtml(result.error) : 'OK'}</td>`
+    html += `</tr>`
   }
-  h += `</tbody></table></div>`
-  if (append) el.innerHTML += h
-  else el.innerHTML = h
+
+  html += `</tbody></table></div>`
+  if (append) container.innerHTML += html
+  else container.innerHTML = html
 }
 
 // ── API Explorer ──
-function toggleApi(el) {
-  el.classList.toggle('open')
+function toggleApiEndpoint(element) {
+  element.classList.toggle('open')
 }
-async function tryApi(path, method = 'GET') {
-  const el = event.target.closest('.api-endpoint').querySelector('.api-response')
-  el.textContent = 'Loading...'
+
+async function tryApiEndpoint(path, method = 'GET') {
+  const responseElement = event.target.closest('.api-endpoint').querySelector('.api-response')
+  responseElement.textContent = 'Loading...'
   try {
-    const r = await fetch(path, { method })
-    const text = await r.text()
+    const response = await axios({
+      url: path,
+      method,
+      transformResponse: [(data) => data],
+      validateStatus: () => true,
+    })
     try {
-      el.textContent = JSON.stringify(JSON.parse(text), null, 2)
+      responseElement.textContent = JSON.stringify(JSON.parse(response.data), null, 2)
     } catch {
-      el.textContent = text.slice(0, 2000)
+      responseElement.textContent = String(response.data).slice(0, 2000)
     }
-  } catch (e) {
-    el.textContent = 'Error: ' + e.message
+  } catch (err) {
+    responseElement.textContent = 'Error: ' + err.message
   }
 }
 
