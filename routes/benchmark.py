@@ -129,30 +129,35 @@ def _build_endpoints(imdb_raw: str):
             }
         )
 
-    # Public
-    if cfg.BENCH_TORRENTIO_RD_KEY:
+    # Public versions of self-hosted services (for comparison)
+    if cfg.BENCH_COMET_CONFIG:
         endpoints.append(
             {
-                "name": "Torrentio (RD)",
+                "name": "Comet (elfhosted)",
                 "group": "public",
-                "url": f"https://torrentio.strem.fun/realdebrid={cfg.BENCH_TORRENTIO_RD_KEY}/stream/{media_type}/{imdb_raw}.json",
+                "url": f"https://comet.elfhosted.com/{cfg.BENCH_COMET_CONFIG}/stream/{media_type}/{imdb_raw}.json",
             }
         )
 
-    endpoints.extend(
-        [
+    if cfg.BENCH_MEDIAFUSION_CONFIG:
+        # Use the elfhosted public MF configs from AIOStreams
+        mf_public_config = "ce696a40844717488c7fbacab6cb4561d2283b3e4e12f8abe7b5ce4f7a6eb9de"
+        endpoints.append(
             {
-                "name": "Torrentio P2P",
+                "name": "MediaFusion (elfhosted)",
                 "group": "public",
-                "url": f"https://torrentio.strem.fun/stream/{media_type}/{imdb_raw}.json",
-            },
+                "url": f"https://mediafusion.elfhosted.com/{mf_public_config}/stream/{media_type}/{imdb_raw}.json",
+            }
+        )
+
+    if cfg.BENCH_STREMTHRU_CONFIG:
+        endpoints.append(
             {
-                "name": "TorBox Stremio",
+                "name": "StremThru (13377001)",
                 "group": "public",
-                "url": f"https://stremio.torbox.app/stream/{media_type}/{imdb_raw}.json",
-            },
-        ]
-    )
+                "url": f"https://stremthru.13377001.xyz/stremio/torz/{cfg.BENCH_STREMTHRU_CONFIG}/stream/{media_type}/{imdb_raw}.json",
+            }
+        )
 
     return endpoints
 
@@ -284,7 +289,6 @@ async def api_benchmark(request: Request):
         "MediaFusion": "BENCH_MEDIAFUSION_CONFIG",
         "StremThru Torz": "BENCH_STREMTHRU_CONFIG",
         "AIOStreams": "BENCH_AIOSTREAMS_CONFIG",
-        "Torrentio (RD)": "BENCH_TORRENTIO_RD_KEY",
     }
     skipped = [{"name": name, "env_var": var} for name, var in _config_map.items() if not getattr(cfg, var, "")]
 
