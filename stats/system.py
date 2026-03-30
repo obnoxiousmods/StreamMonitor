@@ -22,6 +22,70 @@ _prev_disk_io: object = None
 _prev_net_io: object = None
 _prev_io_time: float = 0.0
 
+# GPU fdinfo tracking — delta-based engine utilization
+_prev_gpu_engines: dict[str, int] = {}  # engine_name -> total_ns
+_prev_gpu_time: float = 0.0
+
+
+def _get_gpu_fdinfo_usage() -> dict[str, int]:
+    """Read GPU engine utilization from /proc/*/fdinfo/* (drm-engine-* fields).
+
+    Returns dict of engine_name -> usage_percent (0-100) based on ns delta
+    since last call. Returns empty dict on first call or error.
+    """
+    global _prev_gpu_engines, _prev_gpu_time
+
+    now = time.time()
+    engine_totals: dict[str, int] = {}
+
+    try:
+        proc = Path("/proc")
+        for pid_dir in proc.iterdir():
+            if not pid_dir.name.isdigit():
+                continue
+            fdinfo_dir = pid_dir / "fdinfo"
+            if not fdinfo_dir.is_dir():
+                continue
+            try:
+                for fd_file in fdinfo_dir.iterdir():
+                    try:
+                        content = fd_file.read_text()
+                        if "drm-engine-" not in content:
+                            continue
+                        for line in content.splitlines():
+                            if line.startswith("drm-engine-"):
+                                parts = line.split(":\t")
+                                if len(parts) == 2:
+                                    engine = parts[0].removeprefix("drm-engine-")
+                                    ns_str = parts[1].strip().removesuffix(" ns")
+                                    engine_totals[engine] = engine_totals.get(engine, 0) + int(ns_str)
+                    except (PermissionError, OSError, ValueError):
+                        continue
+            except (PermissionError, OSError):
+                continue
+    except Exception:
+        return {}
+
+    if not engine_totals:
+        return {}
+
+    dt = now - _prev_gpu_time if _prev_gpu_time > 0 else 0
+    result: dict[str, int] = {}
+
+    if dt >= 2.0 and _prev_gpu_engines:
+        dt_ns = dt * 1_000_000_000
+        for engine, total_ns in engine_totals.items():
+            prev_ns = _prev_gpu_engines.get(engine, 0)
+            delta = total_ns - prev_ns
+            if delta >= 0:
+                pct = min(round(delta / dt_ns * 100), 100)
+                if pct > 0:
+                    result[engine] = pct
+
+    _prev_gpu_engines = engine_totals
+    _prev_gpu_time = now
+    return result
+
 # Seed baseline at import so the first collection can compute rates immediately
 if _HAS_PSUTIL:
     import psutil as _p
@@ -266,8 +330,16 @@ def _collect_system_sync() -> dict:
 
         gpu["name"] = "AMD Radeon RX 580"
 
-        if (v := _sysfs(f"{base}/gpu_busy_percent")) is not None:
-            gpu["usage_pct"] = int(v)
+        # gpu_busy_percent only tracks 3D/compute, not video encode/decode.
+        # Supplement with fdinfo-based per-engine utilization.
+        sysfs_busy = _sysfs(f"{base}/gpu_busy_percent")
+        fdinfo_usage = _get_gpu_fdinfo_usage()
+        if fdinfo_usage:
+            # Use the max of any engine as the headline usage
+            gpu["usage_pct"] = max(fdinfo_usage.values(), default=0)
+            gpu["engines"] = fdinfo_usage
+        elif sysfs_busy is not None:
+            gpu["usage_pct"] = int(sysfs_busy)
 
         if (v := _sysfs(f"{base}/mem_busy_percent")) is not None:
             gpu["mem_busy_pct"] = int(v)

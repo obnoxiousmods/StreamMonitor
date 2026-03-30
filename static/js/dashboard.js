@@ -246,6 +246,14 @@ function renderSystem(systemStats) {
       html += systemRow('Usage', `${gpu.usage_pct}%`, gpuColor)
       html += systemBar(gpu.usage_pct, gpuColor)
     }
+    if (gpu.engines) {
+      const engineNames = { compute: 'Compute', enc: 'Encode', dec: 'Decode', gfx: '3D', dma: 'DMA' }
+      for (const [eng, pct] of Object.entries(gpu.engines)) {
+        const label = engineNames[eng] || eng
+        const ec = pct > 80 ? 'err' : pct > 40 ? 'warn' : 'ok'
+        html += systemRow(label, `${pct}%`, ec)
+      }
+    }
     if (gpu.vram_used_mb != null && gpu.vram_total_mb) {
       const vramPercent = (gpu.vram_used_mb / gpu.vram_total_mb) * 100
       const vramColor = vramPercent > 90 ? 'err' : vramPercent > 70 ? 'warn' : 'ok'
