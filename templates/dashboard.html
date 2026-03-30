@@ -223,6 +223,11 @@
         <select id="bench-title" style="min-width: 260px">
           <option value="">Select a title...</option>
         </select>
+        <select id="bench-mode" style="min-width: 0; width: 120px">
+          <option value="all">All (cached + uncached)</option>
+          <option value="cached">Cached Only</option>
+          <option value="uncached">Uncached Only</option>
+        </select>
         <button class="sm" id="bench-run-btn" onclick="runBenchmark()">&#x25B6; Run Benchmark</button>
         <button class="sm" onclick="runAllBenchmarks()">&#x25B6;&#x25B6; Run All (slow)</button>
         <span id="bench-status" style="font-size: 0.68rem; color: var(--muted); margin-left: auto"></span>

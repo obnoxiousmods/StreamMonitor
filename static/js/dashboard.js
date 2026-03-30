@@ -1898,105 +1898,86 @@ async function runBenchmark() {
     document.getElementById('bench-status').textContent = 'Select a title first'
     return
   }
-
+  const mode = document.getElementById('bench-mode')?.value || 'all'
   const runButton = document.getElementById('bench-run-btn')
   const statusLabel = document.getElementById('bench-status')
   runButton.disabled = true
-  statusLabel.textContent = 'Running benchmark for ' + BENCH_TITLES[imdbId] + '...'
+  statusLabel.textContent = `Running ${mode} benchmark for ${BENCH_TITLES[imdbId]}...`
 
-  const data = await safeJson('/api/benchmark?imdb=' + encodeURIComponent(imdbId))
+  const data = await safeJson(`/api/benchmark?imdb=${encodeURIComponent(imdbId)}&mode=${mode}`)
   runButton.disabled = false
 
   if (!data) {
     statusLabel.textContent = 'Benchmark failed'
     return
   }
-  statusLabel.textContent = 'Done — ' + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
+  statusLabel.textContent = `Done — ${data.mode} — ${new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })}`
   renderBenchTable(data)
 }
 
 async function runAllBenchmarks() {
   const statusLabel = document.getElementById('bench-status')
   const container = document.getElementById('bench-results')
+  const mode = document.getElementById('bench-mode')?.value || 'all'
   const titles = Object.entries(BENCH_TITLES)
-  statusLabel.textContent = 'Running all ' + titles.length + ' benchmarks (this takes a while)...'
+  statusLabel.textContent = `Running all ${titles.length} ${mode} benchmarks...`
   container.innerHTML = ''
 
   let progress = 0
   for (const [imdbId, name] of titles) {
     progress++
-    statusLabel.textContent = `[${progress}/${titles.length}] ${name}...`
-    const data = await safeJson('/api/benchmark?imdb=' + encodeURIComponent(imdbId))
+    statusLabel.textContent = `[${progress}/${titles.length}] ${name} (${mode})...`
+    const data = await safeJson(`/api/benchmark?imdb=${encodeURIComponent(imdbId)}&mode=${mode}`)
     if (data) renderBenchTable(data, true)
   }
-  statusLabel.textContent = 'All ' + titles.length + ' benchmarks complete'
+  statusLabel.textContent = `All ${titles.length} ${mode} benchmarks complete`
 }
 
 function renderBenchTable(data, append) {
   const container = document.getElementById('bench-results')
   const summary = data.summary || {}
-  const selfHosted = summary.self_hosted || {}
-  const publicStats = summary.public || {}
-
-  const thStyle = 'text-align:left;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase'
-  const thStyleRight =
-    'text-align:right;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase'
+  const thL = 'text-align:left;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase'
+  const thR = 'text-align:right;padding:.3rem .4rem;color:var(--muted);font-size:.6rem;text-transform:uppercase'
+  const cs = 'padding:.25rem .4rem'
 
   let html = `<div style="margin-bottom:1.2rem;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.85rem;overflow-x:auto">`
 
-  // Title row
+  // Title + mode badge
   html += `<div style="display:flex;gap:.8rem;align-items:center;margin-bottom:.6rem;flex-wrap:wrap">`
   html += `<strong style="color:var(--accent2);font-size:.88rem">${escapeHtml(data.title)}</strong>`
   html += `<code style="font-size:.68rem">${escapeHtml(data.imdb)}</code>`
+  html += `<span style="font-size:.58rem;padding:.1rem .4rem;border-radius:4px;background:#1e2235;color:var(--muted)">${data.mode || 'all'}</span>`
   html += `<span style="font-size:.68rem;color:var(--muted);margin-left:auto">${new Date(data.timestamp).toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })}</span>`
   html += `</div>`
 
-  // Summary row
-  html += `<div style="display:flex;gap:1rem;margin-bottom:.6rem;flex-wrap:wrap">`
-  html += `<div style="font-size:.72rem;padding:.3rem .6rem;background:var(--ok-bg);border-radius:6px;border:1px solid #065f46">Self-hosted: <strong style="color:var(--ok)">${selfHosted.total_streams || 0}</strong> streams, avg <strong style="color:var(--ok)">${selfHosted.avg_latency_ms || '—'}</strong>ms</div>`
-  html += `<div style="font-size:.72rem;padding:.3rem .6rem;background:#12232a;border-radius:6px;border:1px solid #164e63">Public: <strong style="color:#67e8f9">${publicStats.total_streams || 0}</strong> streams, avg <strong style="color:#67e8f9">${publicStats.avg_latency_ms || '—'}</strong>ms</div>`
+  // Summary pills by cache mode
+  html += `<div style="display:flex;gap:.5rem;margin-bottom:.6rem;flex-wrap:wrap">`
+  for (const [mode, label, bg, border, color] of [['cached','Cached','var(--ok-bg)','#065f46','var(--ok)'],['uncached','Uncached','#12232a','#164e63','#67e8f9'],['other','Other','#1e2235','var(--border)','var(--muted)']]) {
+    const s = summary[mode]
+    if (!s) continue
+    const sh = s.self_hosted || {}
+    const pub = s.public || {}
+    html += `<div style="font-size:.65rem;padding:.25rem .5rem;background:${bg};border-radius:6px;border:1px solid ${border}"><strong style="color:${color}">${label}</strong> Self: <strong style="color:${color}">${sh.total_streams||0}</strong>/${sh.avg_latency_ms||'\u2014'}ms Pub: <strong style="color:${color}">${pub.total_streams||0}</strong>/${pub.avg_latency_ms||'\u2014'}ms</div>`
+  }
   html += `</div>`
 
-  // Table
-  html += `<table style="width:100%;border-collapse:collapse;font-size:.72rem"><thead><tr style="border-bottom:1px solid var(--border)">`
-  html += `<th style="${thStyle}">Name</th>`
-  html += `<th style="${thStyle}">Group</th>`
-  html += `<th style="${thStyleRight}">Latency</th>`
-  html += `<th style="${thStyleRight}">Streams</th>`
-  html += `<th style="${thStyleRight}">4K</th>`
-  html += `<th style="${thStyleRight}">1080p</th>`
-  html += `<th style="${thStyleRight}">720p</th>`
-  html += `<th style="${thStyle}">Codec</th>`
-  html += `<th style="${thStyle}">Status</th>`
-  html += `</tr></thead><tbody>`
-
-  for (const result of data.results || []) {
-    const groupColor = result.group === 'self-hosted' ? 'ok' : ''
-    const latencyColor =
-      result.latency_ms != null
-        ? result.latency_ms < 2000
-          ? 'ok'
-          : result.latency_ms < 5000
-            ? 'warn'
-            : 'err'
-        : 'muted'
-    const resolutions = result.resolutions || {}
-    const cellStyle = 'padding:.25rem .4rem'
-
-    html += `<tr style="border-bottom:1px solid #13172a">`
-    html += `<td style="${cellStyle};color:#e2e8f0;font-weight:600">${escapeHtml(result.name)}</td>`
-    html += `<td style="${cellStyle};color:var(--${groupColor || 'accent2'})">${escapeHtml(result.group)}</td>`
-    html += `<td style="${cellStyle};text-align:right;color:var(--${latencyColor})">${result.latency_ms != null ? result.latency_ms + 'ms' : '—'}</td>`
-    html += `<td style="${cellStyle};text-align:right;color:var(--accent2);font-weight:700">${result.streams || 0}</td>`
-    html += `<td style="${cellStyle};text-align:right">${resolutions['4k'] || 0}</td>`
-    html += `<td style="${cellStyle};text-align:right">${resolutions['1080p'] || 0}</td>`
-    html += `<td style="${cellStyle};text-align:right">${resolutions['720p'] || 0}</td>`
-    html += `<td style="${cellStyle}">${escapeHtml(result.top_codec || '—')}</td>`
-    html += `<td style="${cellStyle};color:var(--${result.error ? 'err' : 'ok'})">${result.error ? escapeHtml(result.error) : 'OK'}</td>`
-    html += `</tr>`
+  // Results grouped by cache_mode
+  const results = data.results || []
+  for (const [mode, label] of [['cached','CACHED (debrid cache only)'],['uncached','UNCACHED (all torrents)'],['all','']]) {
+    const modeResults = results.filter(r => r.cache_mode === mode)
+    if (!modeResults.length) continue
+    if (label) html += `<div style="font-size:.58rem;color:var(--accent2);text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin:.6rem 0 .3rem;padding-bottom:.2rem;border-bottom:1px solid var(--border)">${label}</div>`
+    html += `<table style="width:100%;border-collapse:collapse;font-size:.72rem"><thead><tr style="border-bottom:1px solid var(--border)"><th style="${thL}">Name</th><th style="${thL}">Host</th><th style="${thR}">Latency</th><th style="${thR}">Streams</th><th style="${thR}">4K</th><th style="${thR}">1080p</th><th style="${thR}">720p</th><th style="${thL}">Codec</th><th style="${thL}">Status</th></tr></thead><tbody>`
+    for (const r of modeResults) {
+      const gc = r.group === 'self-hosted' ? 'ok' : 'accent2'
+      const lc = r.latency_ms != null ? (r.latency_ms < 2000 ? 'ok' : r.latency_ms < 5000 ? 'warn' : 'err') : 'muted'
+      const res = r.resolutions || {}
+      html += `<tr style="border-bottom:1px solid #13172a"><td style="${cs};color:#e2e8f0;font-weight:600;white-space:nowrap">${escapeHtml(r.name)}</td><td style="${cs};color:var(--${gc});font-size:.65rem">${escapeHtml(r.group)}</td><td style="${cs};text-align:right;color:var(--${lc})">${r.latency_ms != null ? r.latency_ms + 'ms' : '\u2014'}</td><td style="${cs};text-align:right;color:var(--accent2);font-weight:700">${r.streams || 0}</td><td style="${cs};text-align:right">${res['4k']||0}</td><td style="${cs};text-align:right">${res['1080p']||0}</td><td style="${cs};text-align:right">${res['720p']||0}</td><td style="${cs}">${escapeHtml(r.top_codec||'\u2014')}</td><td style="${cs};color:var(--${r.error?'err':'ok'})">${r.error ? escapeHtml(r.error) : 'OK'}</td></tr>`
+    }
+    html += `</tbody></table>`
   }
 
-  html += `</tbody></table></div>`
+  html += `</div>`
   if (append) container.innerHTML += html
   else container.innerHTML = html
 }

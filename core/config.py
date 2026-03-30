@@ -276,11 +276,20 @@ SPEEDTEST_CF_URL = os.environ.get("SPEEDTEST_CF_URL", "")
 SPEEDTEST_CF_NAME = os.environ.get("SPEEDTEST_CF_NAME", "Cloudflare")
 
 # ── Benchmark Endpoint Configs ───────────────────────────────────────────────
-# Base64-encoded Stremio addon config tokens for the benchmark feature.
-BENCH_COMET_CONFIG = os.environ.get("BENCH_COMET_CONFIG", "")
+# Comet: separate cached-only and uncached configs (same debrid keys)
+BENCH_COMET_CACHED = os.environ.get("BENCH_COMET_CACHED", "")
+BENCH_COMET_UNCACHED = os.environ.get("BENCH_COMET_UNCACHED", "")
+# StremThru: separate cached and uncached configs
+BENCH_STREMTHRU_CACHED = os.environ.get("BENCH_STREMTHRU_CACHED", "")
+BENCH_STREMTHRU_UNCACHED = os.environ.get("BENCH_STREMTHRU_UNCACHED", "")
+# MediaFusion: self-hosted and public config tokens
 BENCH_MEDIAFUSION_CONFIG = os.environ.get("BENCH_MEDIAFUSION_CONFIG", "")
-BENCH_STREMTHRU_CONFIG = os.environ.get("BENCH_STREMTHRU_CONFIG", "")
+BENCH_MEDIAFUSION_PUBLIC = os.environ.get("BENCH_MEDIAFUSION_PUBLIC", "")
+# AIOStreams
 BENCH_AIOSTREAMS_CONFIG = os.environ.get("BENCH_AIOSTREAMS_CONFIG", "")
+# Legacy (kept for backwards compat)
+BENCH_COMET_CONFIG = os.environ.get("BENCH_COMET_CONFIG", "") or BENCH_COMET_UNCACHED
+BENCH_STREMTHRU_CONFIG = os.environ.get("BENCH_STREMTHRU_CONFIG", "") or BENCH_STREMTHRU_UNCACHED
 BENCH_TORRENTIO_RD_KEY = os.environ.get("BENCH_TORRENTIO_RD_KEY", "")
 
 # ── Service Definitions ───────────────────────────────────────────────────────

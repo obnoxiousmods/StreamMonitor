@@ -65,99 +65,115 @@ TITLES = {
 
 _UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
+
 # ── Endpoint definitions ──────────────────────────────────────────────────────
 
 
-def _build_endpoints(imdb_raw: str):
-    """Return list of endpoint dicts for given IMDB id (may contain :season:episode)."""
+def _build_endpoints(imdb_raw: str, mode: str = "all"):
+    """Build endpoint list. mode: 'cached', 'uncached', or 'all' (both)."""
     is_episode = ":" in imdb_raw
     media_type = "series" if is_episode else "movie"
-
-    # For Zilean we need a title query
     base_imdb = imdb_raw.split(":")[0]
     title = TITLES.get(imdb_raw) or TITLES.get(base_imdb) or "Unknown"
-    # Strip episode suffix like S03E07 for Zilean query
     zilean_query = re.sub(r"\s*S\d+E\d+$", "", title)
 
     endpoints: list[dict] = []
 
-    # Self-hosted (only include if config token is set)
-    if cfg.BENCH_COMET_CONFIG:
-        endpoints.append(
-            {
-                "name": "Comet",
-                "group": "self-hosted",
-                "url": f"{cfg.COMET_URL}/{cfg.BENCH_COMET_CONFIG}/stream/{media_type}/{imdb_raw}.json",
-            }
-        )
+    # ── Comet ──
+    if mode in ("cached", "all") and cfg.BENCH_COMET_CACHED:
+        endpoints.append({
+            "name": "Comet",
+            "group": "self-hosted",
+            "cache_mode": "cached",
+            "url": f"{cfg.COMET_URL}/{cfg.BENCH_COMET_CACHED}/stream/{media_type}/{imdb_raw}.json",
+        })
+        endpoints.append({
+            "name": "Comet (elfhosted)",
+            "group": "public",
+            "cache_mode": "cached",
+            "url": f"https://comet.elfhosted.com/{cfg.BENCH_COMET_CACHED}/stream/{media_type}/{imdb_raw}.json",
+        })
 
-    endpoints.append(
-        {
+    if mode in ("uncached", "all") and cfg.BENCH_COMET_UNCACHED:
+        endpoints.append({
+            "name": "Comet",
+            "group": "self-hosted",
+            "cache_mode": "uncached",
+            "url": f"{cfg.COMET_URL}/{cfg.BENCH_COMET_UNCACHED}/stream/{media_type}/{imdb_raw}.json",
+        })
+        endpoints.append({
+            "name": "Comet (elfhosted)",
+            "group": "public",
+            "cache_mode": "uncached",
+            "url": f"https://comet.elfhosted.com/{cfg.BENCH_COMET_UNCACHED}/stream/{media_type}/{imdb_raw}.json",
+        })
+
+    # ── Zilean (always uncached — it's a search index) ──
+    if mode in ("uncached", "all"):
+        endpoints.append({
             "name": "Zilean",
             "group": "self-hosted",
+            "cache_mode": "uncached",
             "url": f"{cfg.ZILEAN_URL}/dmm/filtered?Query={zilean_query}&limit=100",
             "zilean": True,
-        }
-    )
+        })
 
+    # ── MediaFusion ──
     if cfg.BENCH_MEDIAFUSION_CONFIG:
-        endpoints.append(
-            {
-                "name": "MediaFusion",
-                "group": "self-hosted",
-                "url": f"{cfg.MEDIAFUSION_URL}/{cfg.BENCH_MEDIAFUSION_CONFIG}/stream/{media_type}/{imdb_raw}.json",
-            }
-        )
+        endpoints.append({
+            "name": "MediaFusion",
+            "group": "self-hosted",
+            "cache_mode": "all",
+            "url": f"{cfg.MEDIAFUSION_URL}/{cfg.BENCH_MEDIAFUSION_CONFIG}/stream/{media_type}/{imdb_raw}.json",
+        })
+    if cfg.BENCH_MEDIAFUSION_PUBLIC:
+        endpoints.append({
+            "name": "MediaFusion (elfhosted)",
+            "group": "public",
+            "cache_mode": "all",
+            "url": f"https://mediafusion.elfhosted.com/{cfg.BENCH_MEDIAFUSION_PUBLIC}/stream/{media_type}/{imdb_raw}.json",
+        })
 
-    if cfg.BENCH_STREMTHRU_CONFIG:
-        st_conf = cfg.BENCH_STREMTHRU_CONFIG
-        endpoints.append(
-            {
-                "name": "StremThru Torz",
-                "group": "self-hosted",
-                "url": f"{cfg.STREMTHRU_URL}/stremio/torz/{st_conf}/stream/{media_type}/{imdb_raw}.json",
-            }
-        )
+    # ── StremThru ──
+    if mode in ("cached", "all") and cfg.BENCH_STREMTHRU_CACHED:
+        endpoints.append({
+            "name": "StremThru Torz",
+            "group": "self-hosted",
+            "cache_mode": "cached",
+            "url": f"{cfg.STREMTHRU_URL}/stremio/torz/{cfg.BENCH_STREMTHRU_CACHED}/stream/{media_type}/{imdb_raw}.json",
+        })
+        endpoints.append({
+            "name": "StremThru (13377001)",
+            "group": "public",
+            "cache_mode": "cached",
+            "url": f"https://stremthru.13377001.xyz/stremio/torz/{cfg.BENCH_STREMTHRU_CACHED}/stream/{media_type}/{imdb_raw}.json",
+        })
 
+    if mode in ("uncached", "all") and cfg.BENCH_STREMTHRU_UNCACHED:
+        endpoints.append({
+            "name": "StremThru Torz",
+            "group": "self-hosted",
+            "cache_mode": "uncached",
+            "url": (
+                f"{cfg.STREMTHRU_URL}/stremio/torz/{cfg.BENCH_STREMTHRU_UNCACHED}"
+                f"/stream/{media_type}/{imdb_raw}.json"
+            ),
+        })
+        endpoints.append({
+            "name": "StremThru (13377001)",
+            "group": "public",
+            "cache_mode": "uncached",
+            "url": f"https://stremthru.13377001.xyz/stremio/torz/{cfg.BENCH_STREMTHRU_UNCACHED}/stream/{media_type}/{imdb_raw}.json",
+        })
+
+    # ── AIOStreams (aggregator — no cached/uncached distinction) ──
     if cfg.BENCH_AIOSTREAMS_CONFIG:
-        aio_conf = cfg.BENCH_AIOSTREAMS_CONFIG
-        endpoints.append(
-            {
-                "name": "AIOStreams",
-                "group": "self-hosted",
-                "url": f"{cfg.AIOSTREAMS_URL}/stremio/{aio_conf}/stream/{media_type}/{imdb_raw}.json",
-            }
-        )
-
-    # Public versions of self-hosted services (for comparison)
-    if cfg.BENCH_COMET_CONFIG:
-        endpoints.append(
-            {
-                "name": "Comet (elfhosted)",
-                "group": "public",
-                "url": f"https://comet.elfhosted.com/{cfg.BENCH_COMET_CONFIG}/stream/{media_type}/{imdb_raw}.json",
-            }
-        )
-
-    if cfg.BENCH_MEDIAFUSION_CONFIG:
-        # Use the elfhosted public MF configs from AIOStreams
-        mf_public_config = "ce696a40844717488c7fbacab6cb4561d2283b3e4e12f8abe7b5ce4f7a6eb9de"
-        endpoints.append(
-            {
-                "name": "MediaFusion (elfhosted)",
-                "group": "public",
-                "url": f"https://mediafusion.elfhosted.com/{mf_public_config}/stream/{media_type}/{imdb_raw}.json",
-            }
-        )
-
-    if cfg.BENCH_STREMTHRU_CONFIG:
-        endpoints.append(
-            {
-                "name": "StremThru (13377001)",
-                "group": "public",
-                "url": f"https://stremthru.13377001.xyz/stremio/torz/{cfg.BENCH_STREMTHRU_CONFIG}/stream/{media_type}/{imdb_raw}.json",
-            }
-        )
+        endpoints.append({
+            "name": "AIOStreams",
+            "group": "self-hosted",
+            "cache_mode": "all",
+            "url": f"{cfg.AIOSTREAMS_URL}/stremio/{cfg.BENCH_AIOSTREAMS_CONFIG}/stream/{media_type}/{imdb_raw}.json",
+        })
 
     return endpoints
 
@@ -188,7 +204,6 @@ def _parse_streams(data: dict | list, *, zilean: bool = False) -> dict:
     codec_counts: dict[str, int] = {}
 
     for s in streams:
-        # Zilean entries have raw_title; stremio addons use title or name or description
         title = ""
         if zilean:
             title = s.get("raw_title", "") or s.get("filename", "")
@@ -198,7 +213,7 @@ def _parse_streams(data: dict | list, *, zilean: bool = False) -> dict:
         for res, pat in _RES_PAT.items():
             if pat.search(title):
                 res_counts[res] += 1
-                break  # only count first match
+                break
 
         for codec, pat in _CODEC_PAT.items():
             if pat.search(title):
@@ -222,7 +237,7 @@ async def _bench_one(ep: dict) -> dict:
     result = {
         "name": ep["name"],
         "group": ep["group"],
-        "url": ep["url"],
+        "cache_mode": ep.get("cache_mode", "all"),
         "latency_ms": None,
         "streams": 0,
         "resolutions": {"4k": 0, "1080p": 0, "720p": 0},
@@ -246,7 +261,6 @@ async def _bench_one(ep: dict) -> dict:
                 result["error"] = f"HTTP {resp.status_code}"
                 return result
 
-            # Guard against non-JSON responses (HTML error pages, etc.)
             ct = resp.headers.get("content-type", "")
             body = resp.text
             if not ("json" in ct or body.lstrip().startswith(("{", "["))):
@@ -274,46 +288,67 @@ async def _bench_one(ep: dict) -> dict:
 
 
 async def api_benchmark(request: Request):
-    """Run benchmarks for a given IMDB id across all endpoints."""
+    """Run benchmarks. ?imdb=tt0468569&mode=cached|uncached|all"""
     imdb = request.query_params.get("imdb", "").strip()
     if not imdb:
         return JSONResponse({"error": "imdb parameter required"}, status_code=400)
 
+    mode = request.query_params.get("mode", "all").strip().lower()
+    if mode not in ("cached", "uncached", "all"):
+        mode = "all"
+
     base_imdb = imdb.split(":")[0]
     title = TITLES.get(imdb) or TITLES.get(base_imdb) or "Unknown"
-    endpoints = _build_endpoints(imdb)
-
-    # Warn about unconfigured endpoints
-    _config_map = {
-        "Comet": "BENCH_COMET_CONFIG",
-        "MediaFusion": "BENCH_MEDIAFUSION_CONFIG",
-        "StremThru Torz": "BENCH_STREMTHRU_CONFIG",
-        "AIOStreams": "BENCH_AIOSTREAMS_CONFIG",
-    }
-    skipped = [{"name": name, "env_var": var} for name, var in _config_map.items() if not getattr(cfg, var, "")]
+    endpoints = _build_endpoints(imdb, mode=mode)
 
     results = await asyncio.gather(*[_bench_one(ep) for ep in endpoints])
 
-    # Compute summary
-    sh = [r for r in results if r["group"] == "self-hosted" and r["error"] is None]
-    pub = [r for r in results if r["group"] == "public" and r["error"] is None]
+    # Group results by cache mode for the summary
+    def _summarize(items):
+        ok = [r for r in items if r["error"] is None]
+        return {
+            "total_streams": sum(r["streams"] for r in ok),
+            "avg_latency_ms": int(sum(r["latency_ms"] for r in ok) / len(ok)) if ok else None,
+            "endpoints": len(items),
+        }
 
-    sh_streams = sum(r["streams"] for r in sh)
-    sh_avg_lat = int(sum(r["latency_ms"] for r in sh) / len(sh)) if sh else None
-    pub_streams = sum(r["streams"] for r in pub)
-    pub_avg_lat = int(sum(r["latency_ms"] for r in pub) / len(pub)) if pub else None
+    cached_sh = [r for r in results if r["cache_mode"] == "cached" and r["group"] == "self-hosted"]
+    cached_pub = [r for r in results if r["cache_mode"] == "cached" and r["group"] == "public"]
+    uncached_sh = [r for r in results if r["cache_mode"] == "uncached" and r["group"] == "self-hosted"]
+    uncached_pub = [r for r in results if r["cache_mode"] == "uncached" and r["group"] == "public"]
+    other_sh = [r for r in results if r["cache_mode"] == "all" and r["group"] == "self-hosted"]
+    other_pub = [r for r in results if r["cache_mode"] == "all" and r["group"] == "public"]
 
-    payload: dict = {
+    summary = {}
+    if cached_sh or cached_pub:
+        summary["cached"] = {
+            "self_hosted": _summarize(cached_sh),
+            "public": _summarize(cached_pub),
+        }
+    if uncached_sh or uncached_pub:
+        summary["uncached"] = {
+            "self_hosted": _summarize(uncached_sh),
+            "public": _summarize(uncached_pub),
+        }
+    if other_sh or other_pub:
+        summary["other"] = {
+            "self_hosted": _summarize(other_sh),
+            "public": _summarize(other_pub),
+        }
+
+    # Also compute overall
+    all_sh = [r for r in results if r["group"] == "self-hosted" and r["error"] is None]
+    all_pub = [r for r in results if r["group"] == "public" and r["error"] is None]
+    summary["overall"] = {
+        "self_hosted": _summarize(all_sh),
+        "public": _summarize(all_pub),
+    }
+
+    return JSONResponse({
         "imdb": imdb,
         "title": title,
+        "mode": mode,
         "timestamp": datetime.now(UTC).isoformat(),
         "results": results,
-        "summary": {
-            "self_hosted": {"total_streams": sh_streams, "avg_latency_ms": sh_avg_lat},
-            "public": {"total_streams": pub_streams, "avg_latency_ms": pub_avg_lat},
-        },
-    }
-    if skipped:
-        payload["skipped"] = skipped
-
-    return JSONResponse(payload)
+        "summary": summary,
+    })
