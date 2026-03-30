@@ -1950,14 +1950,23 @@ function renderBenchTable(data, append) {
   html += `<span style="font-size:.68rem;color:var(--muted);margin-left:auto">${new Date(data.timestamp).toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })}</span>`
   html += `</div>`
 
-  // Summary pills by cache mode
-  html += `<div style="display:flex;gap:.5rem;margin-bottom:.6rem;flex-wrap:wrap">`
-  for (const [mode, label, bg, border, color] of [['cached','Cached','var(--ok-bg)','#065f46','var(--ok)'],['uncached','Uncached','#12232a','#164e63','#67e8f9'],['other','Other','#1e2235','var(--border)','var(--muted)']]) {
+  // Overall self-hosted vs public summary (big pills like before)
+  const ov = summary.overall || {}
+  const ovSh = ov.self_hosted || {}
+  const ovPub = ov.public || {}
+  html += `<div style="display:flex;gap:1rem;margin-bottom:.4rem;flex-wrap:wrap">`
+  html += `<div style="font-size:.72rem;padding:.3rem .6rem;background:var(--ok-bg);border-radius:6px;border:1px solid #065f46">Self-hosted: <strong style="color:var(--ok)">${ovSh.total_streams || 0}</strong> streams, avg <strong style="color:var(--ok)">${ovSh.avg_latency_ms || '\u2014'}</strong>ms</div>`
+  html += `<div style="font-size:.72rem;padding:.3rem .6rem;background:#12232a;border-radius:6px;border:1px solid #164e63">Public: <strong style="color:#67e8f9">${ovPub.total_streams || 0}</strong> streams, avg <strong style="color:#67e8f9">${ovPub.avg_latency_ms || '\u2014'}</strong>ms</div>`
+  html += `</div>`
+
+  // Per-mode breakdown (smaller pills)
+  html += `<div style="display:flex;gap:.4rem;margin-bottom:.6rem;flex-wrap:wrap">`
+  for (const [mode, label, bg, border, color] of [['cached','Cached','var(--ok-bg)','#065f46','var(--ok)'],['uncached','Uncached','#12232a','#164e63','#67e8f9']]) {
     const s = summary[mode]
     if (!s) continue
     const sh = s.self_hosted || {}
     const pub = s.public || {}
-    html += `<div style="font-size:.65rem;padding:.25rem .5rem;background:${bg};border-radius:6px;border:1px solid ${border}"><strong style="color:${color}">${label}</strong> Self: <strong style="color:${color}">${sh.total_streams||0}</strong>/${sh.avg_latency_ms||'\u2014'}ms Pub: <strong style="color:${color}">${pub.total_streams||0}</strong>/${pub.avg_latency_ms||'\u2014'}ms</div>`
+    html += `<div style="font-size:.6rem;padding:.2rem .4rem;background:${bg};border-radius:4px;border:1px solid ${border}"><strong style="color:${color}">${label}</strong> Self: ${sh.total_streams||0}/${sh.avg_latency_ms||'\u2014'}ms \u00b7 Pub: ${pub.total_streams||0}/${pub.avg_latency_ms||'\u2014'}ms</div>`
   }
   html += `</div>`
 
