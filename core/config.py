@@ -162,7 +162,10 @@ _SERVICE_URL_PATHS: dict[str, tuple[str, str]] = {
 
 
 def _rebuild_service_urls() -> None:
-    """Rebuild SERVICES health-check URLs and WEB_URLS from current module attrs."""
+    """Rebuild SERVICES health-check URLs from current module attrs.
+
+    WEB_URLS are static external domains and are not rebuilt here.
+    """
     for sid, (attr, path) in _SERVICE_URL_PATHS.items():
         base = globals().get(attr, "")
         if not base:
@@ -172,11 +175,6 @@ def _rebuild_service_urls() -> None:
             SERVICES[sid]["url"] = f"{base}/api/v2.0/indexers/all/results?apikey={key_val}&Query=health&Limit=1"
         elif path is not None:
             SERVICES[sid]["url"] = f"{base}{path}"
-        # Update WEB_URLS
-        if sid == "plex":
-            WEB_URLS[sid] = f"{base}/web"
-        elif sid in WEB_URLS:
-            WEB_URLS[sid] = base
 
 
 def save_urls(updates: dict[str, str]) -> None:
@@ -196,7 +194,7 @@ def save_urls(updates: dict[str, str]) -> None:
         if meta:
             attr = meta["attr"]
             globals()[attr] = v
-    # Rebuild SERVICES dict URLs and WEB_URLS
+    # Rebuild SERVICES dict health-check URLs
     _rebuild_service_urls()
 
 
@@ -469,27 +467,28 @@ def get_live_headers(sid: str) -> dict[str, str]:
     return base
 
 
-# Web panel URLs for the frontend (may differ from API base URLs)
+# External web panel URLs (nginx reverse-proxy domains) for the frontend.
+# These point to the public-facing domains, not internal localhost addresses.
 WEB_URLS: dict[str, str] = {
-    "comet": COMET_URL,
-    "mediafusion": MEDIAFUSION_URL,
-    "stremthru": STREMTHRU_URL,
-    "zilean": ZILEAN_URL,
-    "aiostreams": AIOSTREAMS_URL,
-    "jackett": JACKETT_URL,
-    "prowlarr": PROWLARR_URL,
-    "flaresolverr": FLARESOLVERR_URL,
-    "byparr": BYPARR_URL,
-    "radarr": RADARR_URL,
-    "sonarr": SONARR_URL,
-    "lidarr": LIDARR_URL,
-    "bazarr": BAZARR_URL,
-    "jellyfin": JELLYFIN_URL,
-    "plex": f"{PLEX_URL}/web",
-    "jellyseerr": JELLYSEERR_URL,
-    "dispatcharr": DISPATCHARR_URL,
-    "mediaflow": MEDIAFLOW_URL,
-    "qbittorrent": QBITTORRENT_URL,
+    "comet": "https://comet.obby.ca",
+    "mediafusion": "https://mf.obby.ca",
+    "stremthru": "https://stremthru.obby.ca",
+    "zilean": "https://zilean.obby.ca",
+    "aiostreams": "https://aiostreams.obnoxious.lol",
+    "jackett": "https://jackett.obnoxious.lol",
+    "prowlarr": "https://prowlarr.obnoxious.lol",
+    "flaresolverr": "https://flare.obby.ca",
+    "byparr": "https://byparr.obnoxious.lol",
+    "radarr": "https://radarr.obnoxious.lol",
+    "sonarr": "https://sonarr.obnoxious.lol",
+    "lidarr": "https://lidarr.obnoxious.lol",
+    "bazarr": "https://bazarr.obnoxious.lol",
+    "jellyfin": "https://jellyfin.obnoxious.lol",
+    "plex": "https://plex.obnoxious.lol/web",
+    "jellyseerr": "https://jellyseerr.obnoxious.lol",
+    "dispatcharr": "https://dispatcharr.obnoxious.lol",
+    "mediaflow": "https://mediaflow.obby.ca",
+    "qbittorrent": "https://qbt.obnoxious.lol",
 }
 
 CATEGORIES: dict[str, str] = {
