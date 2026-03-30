@@ -32,6 +32,7 @@ import core.logging_config  # noqa: F401 — side-effect import
 import core.perms as _perms
 import stats as _stats
 from routes.aiostreams import api_aiostreams_analyze, api_aiostreams_test
+from routes.mediafusion import api_mediafusion_analyze, api_mediafusion_metrics
 from routes.benchmark import TITLES as BENCH_TITLES
 from routes.benchmark import api_benchmark
 from routes.dmesg import api_dmesg
@@ -480,6 +481,8 @@ app = Starlette(
         Route("/api/dmesg", require_auth(api_dmesg)),
         Route("/api/aiostreams/analyze", require_auth(api_aiostreams_analyze)),
         Route("/api/aiostreams/test", require_auth(api_aiostreams_test), methods=["POST"]),
+        Route("/api/mediafusion/metrics", require_auth(api_mediafusion_metrics)),
+        Route("/api/mediafusion/analyze", require_auth(api_mediafusion_analyze)),
         Route("/api/public", api_public),
         Route("/speedtest", require_auth(speedtest_page)),
         Route("/speedtest/download", speedtest_download),

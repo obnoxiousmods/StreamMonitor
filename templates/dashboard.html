@@ -836,6 +836,28 @@
           <button class="mtab" id="mtab-testsuite" style="display: none" onclick="initTestSuite();openModalTab('testsuite', this)">
             Test Suite
           </button>
+          <button
+            class="mtab"
+            id="mtab-mfmetrics"
+            style="display: none"
+            onclick="
+              openModalTab('mfmetrics', this)
+              loadMfMetrics()
+            "
+          >
+            Metrics
+          </button>
+          <button
+            class="mtab"
+            id="mtab-mfanalyzer"
+            style="display: none"
+            onclick="
+              openModalTab('mfanalyzer', this)
+              loadMfAnalyzer()
+            "
+          >
+            Scraper Analyzer
+          </button>
         </div>
         <div id="mt-overview" class="mpanel active">
           <div id="modal-stats-body"></div>
@@ -890,13 +912,67 @@
               <option value="2000">Last 2000 lines</option>
               <option value="5000" selected>Last 5000 lines</option>
               <option value="10000">Last 10000 lines</option>
+              <option value="25000">Last 25000 lines</option>
+              <option value="50000">Last 50000 lines</option>
             </select>
             <button class="sm" onclick="loadAnalyzer()">Refresh</button>
+            <button class="sm" onclick="loadAnalyzerRaw()">Raw Logs</button>
             <span id="analyzer-status" style="font-size: 0.65rem; color: var(--muted); margin-left: auto"></span>
           </div>
           <div id="analyzer-body" style="overflow-y: auto; flex: 1; min-height: 0">
             <div style="color: var(--muted); font-size: 0.78rem; padding: 0.5rem">
               Click Analyzer tab to load data...
+            </div>
+          </div>
+        </div>
+        <!-- MediaFusion Metrics -->
+        <div id="mt-mfmetrics" class="mpanel">
+          <div
+            style="
+              display: flex;
+              gap: 0.5rem;
+              align-items: center;
+              flex-wrap: wrap;
+              flex-shrink: 0;
+              margin-bottom: 0.7rem;
+            "
+          >
+            <button class="sm" onclick="loadMfMetrics()">Refresh</button>
+            <span id="mfmetrics-status" style="font-size: 0.65rem; color: var(--muted); margin-left: auto"></span>
+          </div>
+          <div id="mfmetrics-body" style="overflow-y: auto; flex: 1; min-height: 0">
+            <div style="color: var(--muted); font-size: 0.78rem; padding: 0.5rem">
+              Click Metrics tab to load data...
+            </div>
+          </div>
+        </div>
+        <!-- MediaFusion Scraper Analyzer -->
+        <div id="mt-mfanalyzer" class="mpanel">
+          <div
+            style="
+              display: flex;
+              gap: 0.5rem;
+              align-items: center;
+              flex-wrap: wrap;
+              flex-shrink: 0;
+              margin-bottom: 0.7rem;
+            "
+          >
+            <select id="mfanalyzer-lines" style="min-width: 0; width: 140px">
+              <option value="5000">Last 5K lines</option>
+              <option value="10000" selected>Last 10K lines</option>
+              <option value="25000">Last 25K lines</option>
+              <option value="50000">Last 50K lines</option>
+              <option value="100000">Last 100K lines</option>
+              <option value="all">All Logs</option>
+            </select>
+            <button class="sm" onclick="loadMfAnalyzer()">Refresh</button>
+            <button class="sm" onclick="loadMfAnalyzerRaw()">Raw Logs</button>
+            <span id="mfanalyzer-status" style="font-size: 0.65rem; color: var(--muted); margin-left: auto"></span>
+          </div>
+          <div id="mfanalyzer-body" style="overflow-y: auto; flex: 1; min-height: 0">
+            <div style="color: var(--muted); font-size: 0.78rem; padding: 0.5rem">
+              Click Scraper Analyzer tab to load data...
             </div>
           </div>
         </div>
