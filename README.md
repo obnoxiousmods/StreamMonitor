@@ -149,6 +149,9 @@ SPEEDTEST_CF_URL=https://speedtest-cf.example.com/speedtest/download
 
 # Session Secret
 MONITOR_SECRET=your-random-secret
+
+# Optional: custom systemd unit names, or "none" for HTTP-only checks
+JELLYFIN_UNIT=jellyfin-test
 ```
 
 ### Settings UI
@@ -162,7 +165,7 @@ Edit `core/config.py`:
 ```python
 SERVICES["myservice"] = {
     "name": "My Service",
-    "unit": "myservice",                    # systemd unit
+    "unit": "myservice",                    # systemd unit, or None for HTTP-only
     "url": "http://127.0.0.1:PORT/health",  # health endpoint
     "ok": [200],                             # expected status codes
     "headers": {"X-Api-Key": MY_KEY},        # optional auth

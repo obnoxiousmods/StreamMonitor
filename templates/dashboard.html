@@ -83,6 +83,15 @@
         Benchmark
       </button>
       <button class="tab" onclick="switchTab('a', this)">API</button>
+      <button
+        class="tab"
+        onclick="
+          switchTab('pk', this)
+          loadPackages()
+        "
+      >
+        Packages
+      </button>
     </div>
 
     <div id="p-s" class="panel active">
@@ -803,6 +812,22 @@
       </div>
     </div>
 
+    <!-- Process Monitor Modal -->
+    <div id="proc-modal" class="modal-overlay" onclick="if(event.target===this)closeProcModal()" style="display:none;opacity:1;pointer-events:all">
+      <div class="modal" style="width:min(900px,96vw)">
+        <div class="modal-hdr">
+          <div class="modal-title">
+            <span>Process Monitor</span>
+            <span style="font-size:.62rem;color:var(--muted);font-weight:400;margin-left:.5rem">top by CPU · deduped</span>
+          </div>
+          <button class="modal-close" onclick="closeProcModal()">&#x2715;</button>
+        </div>
+        <div style="padding:.5rem .75rem;overflow-y:auto;flex:1;min-height:0" id="proc-modal-body">
+          <div style="color:var(--muted);font-size:.78rem">Loading…</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Service Modal -->
     <div id="svc-modal" class="modal-overlay" onclick="if (event.target === this) closeModal()">
       <div class="modal">
@@ -1014,6 +1039,20 @@
           <!-- Results table -->
           <div id="test-results" style="overflow-y:auto;flex:1;min-height:0"></div>
         </div>
+      </div>
+    </div>
+
+    <div id="p-pk" class="panel">
+      <div class="toolbar" style="align-items:center;gap:.6rem;flex-wrap:wrap">
+        <button id="pkg-refresh-btn" class="sm" onclick="loadPackages(true)">⟳ Check now</button>
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:.72rem;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="pkg-show-all" onchange="renderPackages()">
+          Show all native packages
+        </label>
+        <span id="pkg-meta" style="font-size:.72rem;color:var(--muted);margin-left:auto"></span>
+      </div>
+      <div id="pkg-results" style="margin-top:.6rem">
+        <div style="color:var(--muted);padding:.5rem">Click the tab to load package data…</div>
       </div>
     </div>
 

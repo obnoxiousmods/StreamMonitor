@@ -247,7 +247,12 @@ function renderSystem(systemStats) {
       html += systemBar(gpu.usage_pct, gpuColor)
     }
     if (gpu.engines) {
-      const engineNames = { compute: 'Compute', enc: 'Encode', dec: 'Decode', gfx: '3D', dma: 'DMA' }
+      const engineNames = {
+        // AMD / Intel fdinfo engine names
+        compute: 'Compute', enc: 'Encode', dec: 'Decode', gfx: '3D', dma: 'DMA',
+        render: '3D', copy: 'Copy', video: 'Video', 'video enhance': 'Vid Enh',
+        // NVIDIA nvidia-smi names already mapped to enc/dec above
+      }
       for (const [eng, pct] of Object.entries(gpu.engines)) {
         const label = engineNames[eng] || eng
         const ec = pct > 80 ? 'err' : pct > 40 ? 'warn' : 'ok'
@@ -267,6 +272,7 @@ function renderSystem(systemStats) {
     if (gpu.power_w != null) html += systemRow('Power', `${gpu.power_w} W`)
     if (gpu.core_mhz != null) html += systemRow('Core / Mem MHz', `${gpu.core_mhz} / ${gpu.mem_mhz || '?'}`)
     if (gpu.fan_rpm != null) html += systemRow('Fan', `${gpu.fan_rpm} RPM`)
+    if (gpu.fan_pct != null) html += systemRow('Fan', `${gpu.fan_pct}%`)
     if (gpu.mem_busy_pct != null) html += systemRow('Mem busy', `${gpu.mem_busy_pct}%`)
     html += '</div>'
   }
@@ -329,8 +335,112 @@ function renderSystem(systemStats) {
     html += '</div>'
   }
 
+  // ── Top Processes ──
+  const procs = systemStats.top_processes || []
+  if (procs.length) {
+    html += '<div class="sys-sec proc-sec" onclick="event.stopPropagation();openProcModal()" title="Click for full process list">'
+    html += '<div class="sys-ttl">Top Processes <span style="font-size:.55rem;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">↑ CPU · click for details</span></div>'
+    for (const p of procs) {
+      const cpuColor = p.cpu_pct > 50 ? 'err' : p.cpu_pct > 20 ? 'warn' : p.cpu_pct > 0 ? 'ok' : 'muted'
+      const cpuBar = `<div style="width:${Math.min(p.cpu_pct * 2, 100)}%;height:3px;background:var(--${cpuColor});border-radius:2px;margin-top:1px"></div>`
+      html += `<div class="proc-row">`
+      html += `<span class="proc-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>`
+      html += `<span class="proc-cpu" style="color:var(--${cpuColor})">${p.cpu_pct.toFixed(1)}%</span>`
+      html += `<span class="proc-mem">${p.mem_mb}M</span>`
+      html += `</div>`
+      html += cpuBar
+    }
+    html += '</div>'
+  }
+
+  // ── Packages ──
+  const pkgs = systemStats.packages
+  if (pkgs) {
+    const total = (pkgs.native_total || 0) + (pkgs.aur_total || 0)
+    const outdatedNative = pkgs.outdated_native
+    const outdatedAur    = pkgs.outdated_aur
+    const hasUpdateData  = outdatedNative != null || outdatedAur != null
+    const totalOutdated  = (outdatedNative || 0) + (outdatedAur || 0)
+    const outdatedColor  = totalOutdated > 0 ? 'warn' : 'ok'
+    html += '<div class="sys-sec">'
+    html += '<div class="sys-ttl">Packages <span style="font-size:.55rem;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">· <a href="#" onclick="event.preventDefault();switchTab(\'pk\',document.querySelector(\'.tab[onclick*=\\\"pk\\\"]\'))" style="color:var(--muted);text-decoration:none">details ↗</a></span></div>'
+    html += systemRow('Native / AUR', `${(pkgs.native_total||0).toLocaleString()} / ${(pkgs.aur_total||0).toLocaleString()}`)
+    html += systemRow('Total', total.toLocaleString())
+    if (hasUpdateData) {
+      html += systemRow('Outdated', totalOutdated > 0 ? `${totalOutdated} update${totalOutdated>1?'s':''}` : '✓ Up to date', outdatedColor)
+      if (totalOutdated > 0) {
+        if (outdatedNative) html += systemRow('↳ Native', `${outdatedNative} pending`, 'warn')
+        if (outdatedAur)    html += systemRow('↳ AUR',    `${outdatedAur} pending`,    'warn')
+      }
+    } else {
+      html += `<div style="font-size:.68rem;color:var(--muted);padding:.15rem 0">Run check in <a href="#" onclick="event.preventDefault();switchTab('pk',document.querySelector('.tab[onclick*=\\'pk\\']'))" style="color:var(--accent)">Packages tab</a></div>`
+    }
+    html += '</div>'
+  }
+
   html += '</div>'
   return html
+}
+
+// ── Process Monitor Modal ──
+async function openProcModal() {
+  const overlay = document.getElementById('proc-modal')
+  if (!overlay) return
+  overlay.style.display = 'flex'
+  const body = document.getElementById('proc-modal-body')
+  body.innerHTML = '<div style="color:var(--muted);font-size:.78rem;padding:.5rem">Loading processes…</div>'
+
+  try {
+    const data = await safeJson('/api/processes')
+    const procs = data.processes || []
+    if (!procs.length) {
+      body.innerHTML = '<div style="color:var(--muted);padding:.5rem">No process data available.</div>'
+      return
+    }
+
+    const maxCpu = Math.max(...procs.map((p) => p.cpu_pct), 0.1)
+    const maxMem = Math.max(...procs.map((p) => p.mem_pct), 0.1)
+
+    let h = '<table class="proc-table">'
+    h += '<thead><tr>'
+    h += '<th>Name</th><th>PID</th><th>CPU %</th><th>RAM %</th><th>RSS MB</th><th>User</th><th>Status</th><th>Command</th>'
+    h += '</tr></thead><tbody>'
+
+    for (const p of procs) {
+      const cpuColor = p.cpu_pct > 50 ? 'var(--err)' : p.cpu_pct > 20 ? 'var(--warn)' : p.cpu_pct > 0 ? 'var(--ok)' : 'var(--muted)'
+      const memColor = p.mem_pct > 20 ? 'var(--warn)' : p.mem_pct > 5 ? 'var(--accent2)' : 'var(--muted2)'
+      const statusColor = p.status === 'running' ? 'var(--ok)' : p.status === 'sleeping' ? 'var(--muted)' : 'var(--warn)'
+      const cpuBarW = Math.min((p.cpu_pct / maxCpu) * 100, 100).toFixed(1)
+      const memBarW = Math.min((p.mem_pct / maxMem) * 100, 100).toFixed(1)
+
+      h += '<tr>'
+      h += `<td class="proc-name-cell" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>`
+      h += `<td style="color:var(--muted);font-family:monospace;font-size:.65rem">${p.pid}</td>`
+      h += `<td><div style="display:flex;align-items:center;gap:.4rem">
+        <div class="proc-bar-wrap"><div class="proc-bar" style="width:${cpuBarW}%;background:${cpuColor}"></div></div>
+        <span style="color:${cpuColor};font-weight:700;font-family:monospace;min-width:4ch">${p.cpu_pct.toFixed(1)}</span>
+      </div></td>`
+      h += `<td><div style="display:flex;align-items:center;gap:.4rem">
+        <div class="proc-bar-wrap"><div class="proc-bar" style="width:${memBarW}%;background:${memColor}"></div></div>
+        <span style="color:${memColor};font-family:monospace;min-width:4ch">${p.mem_pct.toFixed(1)}</span>
+      </div></td>`
+      h += `<td style="color:var(--muted2);font-family:monospace">${p.mem_mb}</td>`
+      h += `<td style="color:var(--muted);font-size:.62rem">${escapeHtml(p.user)}</td>`
+      h += `<td style="color:${statusColor};font-size:.62rem">${escapeHtml(p.status)}</td>`
+      h += `<td class="proc-cmd" title="${escapeHtml(p.cmd)}">${escapeHtml(p.cmd)}</td>`
+      h += '</tr>'
+    }
+
+    h += '</tbody></table>'
+    body.innerHTML = h
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--err);padding:.5rem">Failed to load: ${escapeHtml(String(e))}</div>`
+  }
+}
+
+function closeProcModal() {
+  const overlay = document.getElementById('proc-modal')
+  if (overlay) overlay.style.display = 'none'
 }
 
 // ── Stats Renderers ──
@@ -1772,7 +1882,10 @@ function openServiceWebUI() {
 
 // ── Keyboard: Escape closes modal ──
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeModal()
+  if (event.key === 'Escape') {
+    closeModal()
+    closeProcModal()
+  }
 })
 
 // ── Jellyfin Tab ──
@@ -3048,6 +3161,150 @@ function renderMfAnalyzer(d) {
   }
 
   body.innerHTML = h
+}
+
+// ── Packages Tab ──
+let packagesData = null
+let packagesLoaded = false
+
+async function loadPackages(force = false) {
+  if (packagesLoaded && !force) return
+  packagesLoaded = true
+
+  const btn = document.getElementById('pkg-refresh-btn')
+  const meta = document.getElementById('pkg-meta')
+  const results = document.getElementById('pkg-results')
+
+  btn.disabled = true
+  btn.textContent = 'Checking…'
+  results.innerHTML = '<div style="color:var(--muted);padding:.5rem">Checking for updates…</div>'
+  meta.textContent = ''
+
+  const url = force ? '/api/packages?refresh=1' : '/api/packages'
+  const data = await safeJson(url)
+
+  btn.disabled = false
+  btn.textContent = '⟳ Check now'
+
+  if (!data) {
+    results.innerHTML = '<div style="color:var(--err);padding:.5rem">Failed to load package data.</div>'
+    return
+  }
+
+  packagesData = data
+  renderPackages()
+}
+
+function renderPackages() {
+  if (!packagesData) return
+
+  const results = document.getElementById('pkg-results')
+  const meta = document.getElementById('pkg-meta')
+  const showAll = document.getElementById('pkg-show-all')?.checked ?? false
+
+  const { native, aur, ts } = packagesData
+  meta.textContent = `Last checked: ${formatTimestamp(ts)}`
+
+  // ── Summary bar ──
+  const nativeValueClass = native.outdated > 0 ? 'has-updates' : 'no-updates'
+  const aurValueClass = aur.outdated > 0 ? 'has-updates' : 'no-updates'
+
+  let html = `
+  <div class="pkg-summary">
+    <div class="pkg-summary-item">
+      <span class="pkg-summary-label">Native outdated</span>
+      <span class="pkg-summary-value ${nativeValueClass}">${native.outdated}</span>
+    </div>
+    <div class="pkg-summary-item">
+      <span class="pkg-summary-label">Native total</span>
+      <span class="pkg-summary-value">${native.total.toLocaleString()}</span>
+    </div>
+    <div class="pkg-summary-item">
+      <span class="pkg-summary-label">AUR outdated</span>
+      <span class="pkg-summary-value ${aurValueClass}">${aur.outdated}</span>
+    </div>
+    <div class="pkg-summary-item">
+      <span class="pkg-summary-label">AUR total</span>
+      <span class="pkg-summary-value">${aur.total.toLocaleString()}</span>
+    </div>
+  </div>`
+
+  // ── Native packages section ──
+  const nativeUpdatesSet = new Set(native.updates.map((u) => u.name))
+
+  if (showAll) {
+    // Build a map of updates for quick lookup when showing all packages
+    const nativeUpdateMap = {}
+    native.updates.forEach((u) => { nativeUpdateMap[u.name] = u })
+
+    // We need the full package list — use the updates data we have and
+    // indicate that the rest of the native packages are up to date.
+    // Since we don't have the full list in the response (only totals),
+    // show the outdated list first then a note about the rest.
+    html += `<div class="pkg-section-title">Native packages — ${native.outdated} outdated of ${native.total.toLocaleString()} total</div>`
+
+    if (native.updates.length === 0) {
+      html += '<div style="color:var(--ok);padding:.4rem .5rem;font-size:.78rem">✓ All native packages are up to date.</div>'
+    } else {
+      html += buildNativeTable(native.updates, true)
+      html += `<div style="color:var(--muted);font-size:.7rem;padding:.4rem .5rem">${native.total - native.outdated} other native packages are up to date.</div>`
+    }
+  } else {
+    html += `<div class="pkg-section-title">Native packages with updates available (${native.outdated} of ${native.total.toLocaleString()})</div>`
+    if (native.updates.length === 0) {
+      html += '<div style="color:var(--ok);padding:.4rem .5rem;font-size:.78rem">✓ All native packages are up to date.</div>'
+    } else {
+      html += buildNativeTable(native.updates, false)
+    }
+  }
+
+  // ── AUR section ──
+  html += `<div class="pkg-section-title" style="margin-top:1.2rem">AUR / foreign packages with updates available (${aur.outdated} of ${aur.total.toLocaleString()})</div>`
+  if (aur.updates.length === 0) {
+    html += '<div style="color:var(--ok);padding:.4rem .5rem;font-size:.78rem">✓ All AUR packages are up to date.</div>'
+  } else {
+    html += buildAurTable(aur.updates)
+  }
+
+  results.innerHTML = html
+}
+
+function buildNativeTable(updates, _showAll) {
+  let rows = ''
+  updates.forEach((pkg) => {
+    rows += `<tr class="pkg-outdated">
+      <td><span class="pkg-name">${escapeHtml(pkg.name)}</span></td>
+      <td><span class="pkg-ver-inst">${escapeHtml(pkg.installed)}</span></td>
+      <td><span class="pkg-arrow">→</span></td>
+      <td><span class="pkg-ver-new">${escapeHtml(pkg.available)}</span></td>
+      <td><span class="pkg-badge outdated">update</span></td>
+    </tr>`
+  })
+  return `<table class="pkg-table">
+    <thead><tr>
+      <th>Package</th><th>Installed</th><th></th><th>Available</th><th>Status</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`
+}
+
+function buildAurTable(updates) {
+  let rows = ''
+  updates.forEach((pkg) => {
+    rows += `<tr class="pkg-outdated">
+      <td><span class="pkg-name">${escapeHtml(pkg.name)}</span></td>
+      <td><span class="pkg-ver-inst">${escapeHtml(pkg.installed)}</span></td>
+      <td><span class="pkg-arrow">→</span></td>
+      <td><span class="pkg-ver-new">${escapeHtml(pkg.available)}</span></td>
+      <td><span class="pkg-badge aur">aur</span></td>
+    </tr>`
+  })
+  return `<table class="pkg-table">
+    <thead><tr>
+      <th>Package</th><th>Installed</th><th></th><th>Available</th><th>Source</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`
 }
 
 // ── Init ──

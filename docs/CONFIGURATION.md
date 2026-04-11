@@ -8,7 +8,7 @@ Services are defined in `config.py` in the `SERVICES` dictionary:
 SERVICES = {
     "myservice": {
         "name": "My Service",           # Display name
-        "unit": "myservice",            # systemd unit name
+        "unit": "myservice",            # systemd unit name, or None for HTTP-only
         "url": "http://127.0.0.1:PORT/health",  # Health check URL
         "ok": [200],                    # Acceptable HTTP status codes
         "category": "streaming",        # UI category for grouping
@@ -69,6 +69,23 @@ export PROWLARR_API_KEY=your-key
 ```
 
 Priority: Environment variable > apikeys.json > ~/.apikeys > default
+
+### Custom systemd units and HTTP-only checks
+
+Each built-in service supports a `<SERVICE>_UNIT` environment variable. Use it
+when a service runs under a different systemd name:
+
+```bash
+export JELLYFIN_UNIT=jellyfin-test
+```
+
+Set the unit to `none` to skip systemd and rely on the HTTP health URL only,
+which is useful for Docker, remote servers, and non-systemd hosts:
+
+```bash
+export JELLYFIN_UNIT=none
+export JELLYFIN_URL=https://jellyfin.example.com
+```
 
 ## Admin Password
 

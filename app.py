@@ -36,6 +36,8 @@ from routes.mediafusion import api_mediafusion_analyze, api_mediafusion_metrics
 from routes.benchmark import TITLES as BENCH_TITLES
 from routes.benchmark import api_benchmark
 from routes.dmesg import api_dmesg
+from routes.packages import api_packages
+from routes.processes import api_processes
 from routes.jellyfin import api_jellyfin
 from routes.public import api_public
 from routes.speedtest import speedtest_download, speedtest_page
@@ -479,6 +481,8 @@ app = Starlette(
         Route("/api/benchmark", require_auth(api_benchmark)),
         Route("/api/jellyfin", require_auth(api_jellyfin)),
         Route("/api/dmesg", require_auth(api_dmesg)),
+        Route("/api/packages", require_auth(api_packages)),
+        Route("/api/processes", require_auth(api_processes)),
         Route("/api/aiostreams/analyze", require_auth(api_aiostreams_analyze)),
         Route("/api/aiostreams/test", require_auth(api_aiostreams_test), methods=["POST"]),
         Route("/api/mediafusion/metrics", require_auth(api_mediafusion_metrics)),

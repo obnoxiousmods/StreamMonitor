@@ -7,6 +7,7 @@ import contextlib
 import os
 import platform
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -16,6 +17,34 @@ try:
     _HAS_PSUTIL = True
 except ImportError:
     _HAS_PSUTIL = False
+
+# ── Package count cache (5-minute TTL, read-only counts — fast) ──────────────
+_pkg_cache: dict = {}
+_pkg_cache_ts: float = 0.0
+_PKG_TTL = 300  # 5 minutes
+
+
+def _get_pkg_counts() -> dict:
+    """Return cached native/AUR package counts.  Refreshes every 5 minutes."""
+    global _pkg_cache, _pkg_cache_ts
+    now = time.time()
+    if _pkg_cache and now - _pkg_cache_ts < _PKG_TTL:
+        return _pkg_cache
+    try:
+        native = subprocess.run(
+            ["pacman", "-Qn"], capture_output=True, text=True, timeout=10
+        )
+        aur = subprocess.run(
+            ["pacman", "-Qm"], capture_output=True, text=True, timeout=10
+        )
+        _pkg_cache = {
+            "native_total": len([l for l in native.stdout.splitlines() if l.strip()]),
+            "aur_total":    len([l for l in aur.stdout.splitlines()    if l.strip()]),
+        }
+        _pkg_cache_ts = now
+    except Exception:
+        pass
+    return _pkg_cache
 
 # ── Rate tracking (previous sample values) ───────────────────────────────────
 _prev_disk_io: object = None
@@ -132,6 +161,214 @@ def _fmt_rate(bps: float) -> str:
     if bps < 1024**3:
         return f"{bps / 1024**2:.1f} MB/s"
     return f"{bps / 1024**3:.2f} GB/s"
+
+
+def _collect_gpu_nvidia() -> dict | None:
+    """Collect NVIDIA GPU stats via nvidia-smi."""
+    fields = (
+        "name,utilization.gpu,utilization.memory,"
+        "memory.total,memory.used,"
+        "temperature.gpu,power.draw,"
+        "clocks.current.graphics,clocks.current.memory,fan.speed,"
+        "encoder.stats.sessionCount,encoder.stats.averageFps,encoder.stats.averageLatency,"
+        "utilization.encoder,utilization.decoder"
+    )
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", f"--query-gpu={fields}", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return None
+        parts = [p.strip() for p in r.stdout.strip().split(",")]
+        if len(parts) < 10:
+            return None
+
+        def _float(v: str) -> float | None:
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return None
+
+        gpu: dict = {"name": parts[0]}
+        if (v := _float(parts[1])) is not None:
+            gpu["usage_pct"] = int(v)
+        if (v := _float(parts[2])) is not None:
+            gpu["mem_busy_pct"] = int(v)
+        if (vt := _float(parts[3])) is not None and (vu := _float(parts[4])) is not None:
+            gpu["vram_total_mb"] = int(vt)
+            gpu["vram_used_mb"]  = int(vu)
+        if (v := _float(parts[5])) is not None:
+            gpu["temp_c"] = int(v)
+        if (v := _float(parts[6])) is not None:
+            gpu["power_w"] = round(v)
+        if (v := _float(parts[7])) is not None:
+            gpu["core_mhz"] = int(v)
+        if (v := _float(parts[8])) is not None:
+            gpu["mem_mhz"] = int(v)
+        if (v := _float(parts[9])) is not None:
+            gpu["fan_pct"] = int(v)
+
+        # Encoder/decoder engine utilization (indices 10-14)
+        if len(parts) >= 15:
+            engines: dict[str, int] = {}
+            enc_sessions = _float(parts[10])
+            enc_util = _float(parts[13]) if len(parts) > 13 else None
+            dec_util = _float(parts[14]) if len(parts) > 14 else None
+            if enc_util is not None and enc_util > 0:
+                engines["enc"] = int(enc_util)
+            elif enc_sessions and enc_sessions > 0:
+                enc_fps = _float(parts[11])
+                engines["enc"] = min(round((enc_fps or 0) * 2), 100)
+            if dec_util is not None and dec_util > 0:
+                engines["dec"] = int(dec_util)
+            if engines:
+                gpu["engines"] = engines
+
+        # Fall back to fdinfo if available (NVIDIA open kernel module >= 495)
+        if not gpu.get("engines"):
+            fdinfo = _get_gpu_fdinfo_usage()
+            if fdinfo:
+                gpu["engines"] = fdinfo
+
+        return gpu
+    except Exception:
+        return None
+
+
+def _collect_gpu_amd(card_path: str) -> dict | None:
+    """Collect AMD GPU stats via sysfs."""
+    base = f"{card_path}/device"
+    # Find hwmon sub-directory
+    hwmon = ""
+    for hw in Path(f"{base}/hwmon").glob("hwmon*"):
+        hwmon = str(hw)
+        break
+
+    gpu: dict = {}
+
+    # Human-readable GPU name: try multiple sysfs paths
+    for name_path in [
+        f"{card_path}/device/product_name",
+        f"{base}/label",
+    ]:
+        if (v := _sysfs(name_path)) is not None and v.strip():
+            gpu["name"] = v.strip()
+            break
+    if not gpu.get("name"):
+        try:
+            uevent = Path(f"{base}/uevent").read_text()
+            for line in uevent.splitlines():
+                if line.startswith("PCI_ID="):
+                    gpu["name"] = f"AMD GPU ({line.split('=', 1)[1].strip()})"
+                    break
+        except Exception:
+            pass
+    if not gpu.get("name"):
+        gpu["name"] = "AMD GPU"
+
+    # Prefer fdinfo-based engine usage, fall back to sysfs gpu_busy_percent
+    fdinfo_usage = _get_gpu_fdinfo_usage()
+    if fdinfo_usage:
+        gpu["usage_pct"] = max(fdinfo_usage.values(), default=0)
+        gpu["engines"] = fdinfo_usage
+    elif (v := _sysfs(f"{base}/gpu_busy_percent")) is not None:
+        gpu["usage_pct"] = int(v)
+
+    if (v := _sysfs(f"{base}/mem_busy_percent")) is not None:
+        gpu["mem_busy_pct"] = int(v)
+    if (vt := _sysfs(f"{base}/mem_info_vram_total")) and (vu := _sysfs(f"{base}/mem_info_vram_used")):
+        gpu["vram_total_mb"] = round(int(vt) / 1024**2)
+        gpu["vram_used_mb"]  = round(int(vu) / 1024**2)
+    if hwmon:
+        if (v := _sysfs(f"{hwmon}/temp1_input")):
+            gpu["temp_c"] = round(int(v) / 1000)
+        if (v := _sysfs(f"{hwmon}/power1_input")):
+            gpu["power_w"] = round(int(v) / 1_000_000)
+        if (v := _sysfs(f"{hwmon}/fan1_input")):
+            gpu["fan_rpm"] = int(v)
+        if (v := _sysfs(f"{hwmon}/freq1_input")):
+            gpu["core_mhz"] = round(int(v) / 1_000_000)
+        if (v := _sysfs(f"{hwmon}/freq2_input")):
+            gpu["mem_mhz"] = round(int(v) / 1_000_000)
+    return gpu or None
+
+
+def _collect_gpu_intel(card_path: str) -> dict | None:
+    """Collect Intel Arc/UHD GPU stats via sysfs + fdinfo."""
+    base = f"{card_path}/device"
+    gpu: dict = {}
+
+    # Try to get a real device name from modalias/uevent
+    try:
+        uevent = Path(f"{base}/uevent").read_text()
+        for line in uevent.splitlines():
+            if line.startswith("PCI_ID="):
+                pci_id = line.split("=", 1)[1].strip()
+                gpu["name"] = f"Intel GPU ({pci_id})"
+                break
+    except Exception:
+        pass
+    if not gpu.get("name"):
+        gpu["name"] = "Intel GPU"
+
+    # GT frequency — xe driver: card/gt/gt0/freq0/cur_freq or rps_cur_freq_mhz
+    #                i915 driver: card/gt_cur_freq_mhz
+    for freq_path in [
+        f"{card_path}/gt/gt0/freq0/cur_freq",
+        f"{card_path}/gt/gt0/rps_cur_freq_mhz",
+        f"{card_path}/gt_cur_freq_mhz",
+    ]:
+        if (v := _sysfs(freq_path)) is not None:
+            try:
+                gpu["core_mhz"] = int(v)
+                break
+            except ValueError:
+                pass
+
+    # Max freq for reference
+    for max_path in [
+        f"{card_path}/gt/gt0/freq0/max_freq",
+        f"{card_path}/gt/gt0/rps_max_freq_mhz",
+        f"{card_path}/gt_max_freq_mhz",
+    ]:
+        if (v := _sysfs(max_path)) is not None:
+            try:
+                gpu["core_max_mhz"] = int(v)
+                break
+            except ValueError:
+                pass
+
+    # VRAM (xe driver exposes memory region info)
+    for vram_path in [
+        f"{base}/drm/renderD128/memory_info",
+        f"{card_path}/gt/gt0/lmem0/io_start",
+    ]:
+        pass  # placeholder — xe VRAM not reliably available via simple sysfs reads
+
+    # hwmon: temp + power (i915/xe both expose these)
+    for hw in Path(f"{base}/hwmon").glob("hwmon*"):
+        if (v := _sysfs(f"{hw}/temp1_input")):
+            with contextlib.suppress(ValueError):
+                gpu["temp_c"] = round(int(v) / 1000)
+        if (v := _sysfs(f"{hw}/power1_input")):
+            with contextlib.suppress(ValueError):
+                gpu["power_w"] = round(int(v) / 1_000_000)
+        break
+
+    # Per-engine utilization via fdinfo (drm-engine-* — works for xe/i915 kernel 6.2+)
+    fdinfo = _get_gpu_fdinfo_usage()
+    if fdinfo:
+        # Map Intel engine names to friendly labels
+        intel_engines = {}
+        for eng, pct in fdinfo.items():
+            # Intel engines: "render", "copy", "video", "video enhance", "compute"
+            intel_engines[eng] = pct
+        if intel_engines:
+            gpu["engines"] = intel_engines
+            gpu["usage_pct"] = max(intel_engines.values())
+
+    return gpu if len(gpu) > 1 else None
 
 
 def _collect_system_sync() -> dict:
@@ -322,46 +559,65 @@ def _collect_system_sync() -> dict:
         except Exception:
             pass
 
-    # ── AMD GPU via sysfs ──
+        # ── Top processes by CPU (deduped by name) ──
+        try:
+            cpu_count = psutil.cpu_count(logical=True) or 1
+            raw: list[dict] = []
+            for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent", "memory_info", "status", "username"]):
+                with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    raw.append(p.info)
+            raw.sort(key=lambda x: x.get("cpu_percent") or 0.0, reverse=True)
+            seen_names: set[str] = set()
+            top_procs: list[dict] = []
+            for info in raw:
+                name = info.get("name") or "unknown"
+                if name in seen_names:
+                    continue
+                seen_names.add(name)
+                mem_info = info.get("memory_info")
+                top_procs.append({
+                    "pid": info.get("pid"),
+                    "name": name,
+                    "cpu_pct": round((info.get("cpu_percent") or 0.0) / cpu_count, 1),
+                    "mem_pct": round(info.get("memory_percent") or 0.0, 1),
+                    "mem_mb": round(mem_info.rss / 1024**2, 1) if mem_info else 0,
+                    "status": info.get("status", ""),
+                    "user": ((info.get("username") or "").split("\\")[-1])[:14],
+                })
+                if len(top_procs) >= 5:
+                    break
+            if top_procs:
+                result["top_processes"] = top_procs
+        except Exception:
+            pass
+
+    # ── GPU auto-detection (NVIDIA / AMD / Intel Arc) ──────────────────────
     try:
-        base = "/sys/class/drm/card1/device"
-        hwmon = "/sys/class/drm/card1/device/hwmon/hwmon1"
-        gpu: dict = {}
+        gpu: dict | None = None
 
-        gpu["name"] = "AMD Radeon RX 580"
+        # Detect GPU vendor by scanning /sys/class/drm/card* device vendor IDs
+        for card_path in sorted(Path("/sys/class/drm").glob("card[0-9]*")):
+            if "-" in card_path.name:
+                continue  # skip cardN-* (connector entries)
+            vendor_file = card_path / "device" / "vendor"
+            if not vendor_file.exists():
+                continue
+            vendor_id = vendor_file.read_text().strip().lower()
 
-        # gpu_busy_percent only tracks 3D/compute, not video encode/decode.
-        # Supplement with fdinfo-based per-engine utilization.
-        sysfs_busy = _sysfs(f"{base}/gpu_busy_percent")
-        fdinfo_usage = _get_gpu_fdinfo_usage()
-        if fdinfo_usage:
-            # Use the max of any engine as the headline usage
-            gpu["usage_pct"] = max(fdinfo_usage.values(), default=0)
-            gpu["engines"] = fdinfo_usage
-        elif sysfs_busy is not None:
-            gpu["usage_pct"] = int(sysfs_busy)
+            if vendor_id == "0x10de":  # NVIDIA
+                gpu = _collect_gpu_nvidia()
+                if gpu:
+                    break
 
-        if (v := _sysfs(f"{base}/mem_busy_percent")) is not None:
-            gpu["mem_busy_pct"] = int(v)
+            elif vendor_id == "0x1002":  # AMD
+                gpu = _collect_gpu_amd(str(card_path))
+                if gpu:
+                    break
 
-        if (vt := _sysfs(f"{base}/mem_info_vram_total")) and (vu := _sysfs(f"{base}/mem_info_vram_used")):
-            gpu["vram_total_mb"] = round(int(vt) / 1024**2)
-            gpu["vram_used_mb"] = round(int(vu) / 1024**2)
-
-        if v := _sysfs(f"{hwmon}/temp1_input"):
-            gpu["temp_c"] = round(int(v) / 1000)
-
-        if v := _sysfs(f"{hwmon}/power1_input"):
-            gpu["power_w"] = round(int(v) / 1_000_000)
-
-        if v := _sysfs(f"{hwmon}/fan1_input"):
-            gpu["fan_rpm"] = int(v)
-
-        if v := _sysfs(f"{hwmon}/freq1_input"):
-            gpu["core_mhz"] = round(int(v) / 1_000_000)
-
-        if v := _sysfs(f"{hwmon}/freq2_input"):
-            gpu["mem_mhz"] = round(int(v) / 1_000_000)
+            elif vendor_id == "0x8086":  # Intel Arc
+                gpu = _collect_gpu_intel(str(card_path))
+                if gpu:
+                    break
 
         if gpu:
             result["gpu"] = gpu
@@ -443,6 +699,26 @@ def _collect_system_sync() -> dict:
                 result["sensors"] = sensors
         except Exception:
             pass
+
+    # ── Packages ──────────────────────────────────────────────────────────────
+    try:
+        counts = _get_pkg_counts()
+        if counts:
+            pkg: dict = {
+                "native_total": counts.get("native_total", 0),
+                "aur_total":    counts.get("aur_total", 0),
+            }
+            # Pull outdated counts from the packages route cache if available
+            try:
+                from routes.packages import _cache as _pkg_update_cache
+                if _pkg_update_cache:
+                    pkg["outdated_native"] = _pkg_update_cache.get("native", {}).get("outdated", 0)
+                    pkg["outdated_aur"]    = _pkg_update_cache.get("aur",    {}).get("outdated", 0)
+            except Exception:
+                pass
+            result["packages"] = pkg
+    except Exception:
+        pass
 
     return result
 

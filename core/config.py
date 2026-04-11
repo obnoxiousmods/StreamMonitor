@@ -239,6 +239,22 @@ def _url(env_var: str, registry_key: str, default: str) -> str:
     return os.environ.get(env_var) or _stored_urls.get(registry_key) or default
 
 
+def _unit(env_var: str, default: str | None) -> str | None:
+    """Resolve a systemd unit name.
+
+    Set the environment variable to "none" to disable systemd checks and use
+    HTTP-only monitoring for services running remotely, in Docker, or under a
+    different supervisor.
+    """
+    value = os.environ.get(env_var)
+    if value is None:
+        return default
+    value = value.strip()
+    if value.lower() in {"", "0", "false", "none", "null", "off", "http"}:
+        return None
+    return value
+
+
 # ── Service Base URLs ────────────────────────────────────────────────────────
 # Override any of these via environment variables or the Settings UI.
 COMET_URL = _url("COMET_URL", "comet_url", "http://127.0.0.1:8070")
@@ -296,14 +312,14 @@ BENCH_TORRENTIO_RD_KEY = os.environ.get("BENCH_TORRENTIO_RD_KEY", "")
 SERVICES: dict[str, dict] = {
     "comet": {
         "name": "Comet",
-        "unit": "comet",
+        "unit": _unit("COMET_UNIT", "comet"),
         "url": f"{COMET_URL}/manifest.json",
         "ok": [200],
         "category": "streaming",
     },
     "mediafusion": {
         "name": "MediaFusion",
-        "unit": "mediafusion",
+        "unit": _unit("MEDIAFUSION_UNIT", "mediafusion"),
         "url": f"{MEDIAFUSION_URL}/health",
         "ok": [200, 307],
         "ssl": False,
@@ -311,21 +327,21 @@ SERVICES: dict[str, dict] = {
     },
     "stremthru": {
         "name": "StremThru",
-        "unit": "stremthru",
+        "unit": _unit("STREMTHRU_UNIT", "stremthru"),
         "url": f"{STREMTHRU_URL}/v0/health",
         "ok": [200],
         "category": "streaming",
     },
     "zilean": {
         "name": "Zilean",
-        "unit": "zilean",
+        "unit": _unit("ZILEAN_UNIT", "zilean"),
         "url": f"{ZILEAN_URL}/healthchecks/ping",
         "ok": [200],
         "category": "streaming",
     },
     "aiostreams": {
         "name": "AIOStreams",
-        "unit": "aiostreams",
+        "unit": _unit("AIOSTREAMS_UNIT", "aiostreams"),
         "url": f"{AIOSTREAMS_URL}/stremio/manifest.json",
         "ok": [200, 301, 302],
         "follow_redirects": True,
@@ -333,14 +349,14 @@ SERVICES: dict[str, dict] = {
     },
     "jackett": {
         "name": "Jackett",
-        "unit": "jackett",
+        "unit": _unit("JACKETT_UNIT", "jackett"),
         "url": f"{JACKETT_URL}/api/v2.0/indexers/all/results?apikey={JACKETT_KEY}&Query=health&Limit=1",
         "ok": [200],
         "category": "indexers",
     },
     "prowlarr": {
         "name": "Prowlarr",
-        "unit": "prowlarr",
+        "unit": _unit("PROWLARR_UNIT", "prowlarr"),
         "url": f"{PROWLARR_URL}/api/v1/system/status",
         "ok": [200],
         "headers": {"X-Api-Key": PROWLARR_KEY},
@@ -348,14 +364,14 @@ SERVICES: dict[str, dict] = {
     },
     "flaresolverr": {
         "name": "FlareSolverr",
-        "unit": "flaresolverr",
+        "unit": _unit("FLARESOLVERR_UNIT", "flaresolverr"),
         "url": f"{FLARESOLVERR_URL}/health",
         "ok": [200],
         "category": "indexers",
     },
     "byparr": {
         "name": "Byparr",
-        "unit": "byparr",
+        "unit": _unit("BYPARR_UNIT", "byparr"),
         "url": f"{BYPARR_URL}/",
         "ok": [200, 301, 302],
         "follow_redirects": False,
@@ -363,7 +379,7 @@ SERVICES: dict[str, dict] = {
     },
     "radarr": {
         "name": "Radarr",
-        "unit": "radarr",
+        "unit": _unit("RADARR_UNIT", "radarr"),
         "url": f"{RADARR_URL}/api/v3/system/status",
         "ok": [200],
         "headers": {"X-Api-Key": RADARR_KEY},
@@ -371,7 +387,7 @@ SERVICES: dict[str, dict] = {
     },
     "sonarr": {
         "name": "Sonarr",
-        "unit": "sonarr",
+        "unit": _unit("SONARR_UNIT", "sonarr"),
         "url": f"{SONARR_URL}/api/v3/system/status",
         "ok": [200],
         "headers": {"X-Api-Key": SONARR_KEY},
@@ -379,7 +395,7 @@ SERVICES: dict[str, dict] = {
     },
     "lidarr": {
         "name": "Lidarr",
-        "unit": "lidarr",
+        "unit": _unit("LIDARR_UNIT", "lidarr"),
         "url": f"{LIDARR_URL}/api/v1/system/status",
         "ok": [200],
         "headers": {"X-Api-Key": LIDARR_KEY},
@@ -387,7 +403,7 @@ SERVICES: dict[str, dict] = {
     },
     "bazarr": {
         "name": "Bazarr",
-        "unit": "bazarr",
+        "unit": _unit("BAZARR_UNIT", "bazarr"),
         "url": f"{BAZARR_URL}/api/system/status",
         "ok": [200],
         "headers": {"X-Api-Key": BAZARR_KEY},
@@ -395,21 +411,21 @@ SERVICES: dict[str, dict] = {
     },
     "jellyfin": {
         "name": "Jellyfin",
-        "unit": "jellyfin",
+        "unit": _unit("JELLYFIN_UNIT", "jellyfin"),
         "url": f"{JELLYFIN_URL}/System/Info/Public",
         "ok": [200],
         "category": "media",
     },
     "plex": {
         "name": "Plex",
-        "unit": "plexmediaserver",
+        "unit": _unit("PLEX_UNIT", "plexmediaserver"),
         "url": f"{PLEX_URL}/identity",
         "ok": [200],
         "category": "media",
     },
     "jellyseerr": {
         "name": "Jellyseerr",
-        "unit": "jellyseerr",
+        "unit": _unit("JELLYSEERR_UNIT", "jellyseerr"),
         "url": f"{JELLYSEERR_URL}/api/v1/status",
         "ok": [200],
         "headers": {"X-Api-Key": JELLYSEERR_KEY},
@@ -418,29 +434,39 @@ SERVICES: dict[str, dict] = {
     },
     "dispatcharr": {
         "name": "Dispatcharr",
-        "unit": "dispatcharr",
+        "unit": _unit("DISPATCHARR_UNIT", "dispatcharr"),
         "url": f"{DISPATCHARR_URL}/",
         "ok": [200],
         "category": "dispatch",
     },
     "mediaflow": {
         "name": "MediaFlow Proxy",
-        "unit": "mediaflow-proxy",
+        "unit": _unit("MEDIAFLOW_UNIT", "mediaflow-proxy"),
         "url": f"{MEDIAFLOW_URL}/health",
         "ok": [200],
         "category": "dispatch",
     },
     "qbittorrent": {
         "name": "qBittorrent",
-        "unit": "qbittorrent-nox",
+        "unit": _unit("QBITTORRENT_UNIT", "qbittorrent-nox"),
         "url": f"{QBITTORRENT_URL}/",
         "ok": [200],
         "follow_redirects": True,
         "category": "downloads",
     },
-    "pgbouncer": {"name": "PgBouncer", "unit": "pgbouncer", "url": None, "category": "infra"},
-    "postgresql": {"name": "PostgreSQL", "unit": "postgresql", "url": None, "category": "infra"},
-    "redis": {"name": "Redis / Valkey", "unit": "valkey", "url": None, "category": "infra"},
+    "pgbouncer": {
+        "name": "PgBouncer",
+        "unit": _unit("PGBOUNCER_UNIT", "pgbouncer"),
+        "url": None,
+        "category": "infra",
+    },
+    "postgresql": {
+        "name": "PostgreSQL",
+        "unit": _unit("POSTGRESQL_UNIT", "postgresql"),
+        "url": None,
+        "category": "infra",
+    },
+    "redis": {"name": "Redis / Valkey", "unit": _unit("REDIS_UNIT", "valkey"), "url": None, "category": "infra"},
     "system": {"name": "System", "unit": None, "url": None, "category": "system"},
 }
 

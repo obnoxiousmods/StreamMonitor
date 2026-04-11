@@ -45,14 +45,19 @@ async def http_check(cfg: dict) -> tuple[bool, int | None, str]:
     headers = cfg.get("headers", {})
     ok_codes = cfg.get("ok", [200])
     timeout = cfg.get("timeout", 8)
+    http2 = cfg.get("http2", False)
     try:
         async with httpx.AsyncClient(
             verify=ssl_verify,
-            follow_redirects=follow_redir,
             timeout=timeout,
-            http2=True,
+            http2=http2,
         ) as c:
-            r = await c.get(cfg["url"], headers=headers)
+            try:
+                r = await c.get(cfg["url"], headers=headers, follow_redirects=follow_redir)
+            except TypeError as e:
+                if "follow_redirects" not in str(e):
+                    raise
+                r = await c.get(cfg["url"], headers=headers, allow_redirects=follow_redir)
         ok = r.status_code in ok_codes
         if ok:
             msg = f"HTTP {r.status_code}" if r.status_code < 300 else f"HTTP {r.status_code} Redirect"
@@ -70,8 +75,8 @@ async def http_check(cfg: dict) -> tuple[bool, int | None, str]:
 async def poll(sid: str, cfg: dict) -> dict:
     ts = datetime.now(UTC).isoformat()
 
-    # System pseudo-service: no unit, always "up"
-    if cfg.get("unit") is None:
+    # System pseudo-service: no unit or URL, always "up"
+    if cfg.get("unit") is None and not cfg.get("url"):
         result = {
             "id": sid,
             "name": cfg["name"],
@@ -88,7 +93,10 @@ async def poll(sid: str, cfg: dict) -> dict:
         cur[sid] = result
         return result
 
-    svc_ok, svc_state = await systemd_active(cfg["unit"])
+    if cfg.get("unit"):
+        svc_ok, svc_state = await systemd_active(cfg["unit"])
+    else:
+        svc_ok, svc_state = True, "not configured"
     latency, http_ok, msg = None, None, svc_state
 
     if cfg.get("url"):
