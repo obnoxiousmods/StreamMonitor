@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from starlette.requests import Request
@@ -270,7 +270,7 @@ def _ts_to_epoch(ts_str: str) -> float | None:
         for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
             try:
                 return datetime.strptime(ts_str, fmt).replace(
-                    tzinfo=timezone.utc,
+                    tzinfo=UTC,
                 ).timestamp()
             except ValueError:
                 continue
@@ -288,7 +288,7 @@ def _extract_domain(url: str) -> str:
         return url[:50]
 
 
-def _parse_scrapy_logs(lines: list[str]) -> dict:  # noqa: C901
+def _parse_scrapy_logs(lines: list[str]) -> dict:
     """Parse mediafusion-taskiq-scrapy log lines into structured analysis."""
     # Counters
     streams_added: list[dict] = []
@@ -336,7 +336,11 @@ def _parse_scrapy_logs(lines: list[str]) -> dict:  # noqa: C901
             idx = line.find("- Added torrent") if "- Added torrent" in line else line.find("- store_new_torrent")
             dedup_key = line[idx:]
         elif "INFO: Added torrent" in line or "INFO: store_new_torrent" in line:
-            idx = line.find("INFO: Added torrent") if "INFO: Added torrent" in line else line.find("INFO: store_new_torrent")
+            idx = (
+                line.find("INFO: Added torrent")
+                if "INFO: Added torrent" in line
+                else line.find("INFO: store_new_torrent")
+            )
             dedup_key = line[idx:].replace("INFO: ", "- ", 1)
         elif "] INFO: " in line:
             dedup_key = line[line.find("] INFO: "):]

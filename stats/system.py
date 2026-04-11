@@ -38,8 +38,8 @@ def _get_pkg_counts() -> dict:
             ["pacman", "-Qm"], capture_output=True, text=True, timeout=10
         )
         _pkg_cache = {
-            "native_total": len([l for l in native.stdout.splitlines() if l.strip()]),
-            "aur_total":    len([l for l in aur.stdout.splitlines()    if l.strip()]),
+            "native_total": len([line for line in native.stdout.splitlines() if line.strip()]),
+            "aur_total": len([line for line in aur.stdout.splitlines() if line.strip()]),
         }
         _pkg_cache_ts = now
     except Exception:
@@ -340,7 +340,7 @@ def _collect_gpu_intel(card_path: str) -> dict | None:
                 pass
 
     # VRAM (xe driver exposes memory region info)
-    for vram_path in [
+    for _vram_path in [
         f"{base}/drm/renderD128/memory_info",
         f"{card_path}/gt/gt0/lmem0/io_start",
     ]:
@@ -563,7 +563,8 @@ def _collect_system_sync() -> dict:
         try:
             cpu_count = psutil.cpu_count(logical=True) or 1
             raw: list[dict] = []
-            for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent", "memory_info", "status", "username"]):
+            attrs = ["pid", "name", "cpu_percent", "memory_percent", "memory_info", "status", "username"]
+            for p in psutil.process_iter(attrs):
                 with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     raw.append(p.info)
             raw.sort(key=lambda x: x.get("cpu_percent") or 0.0, reverse=True)

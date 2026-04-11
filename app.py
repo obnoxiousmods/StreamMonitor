@@ -32,13 +32,13 @@ import core.logging_config  # noqa: F401 — side-effect import
 import core.perms as _perms
 import stats as _stats
 from routes.aiostreams import api_aiostreams_analyze, api_aiostreams_test
-from routes.mediafusion import api_mediafusion_analyze, api_mediafusion_metrics
 from routes.benchmark import TITLES as BENCH_TITLES
 from routes.benchmark import api_benchmark
 from routes.dmesg import api_dmesg
+from routes.jellyfin import api_jellyfin
+from routes.mediafusion import api_mediafusion_analyze, api_mediafusion_metrics
 from routes.packages import api_packages
 from routes.processes import api_processes
-from routes.jellyfin import api_jellyfin
 from routes.public import api_public
 from routes.speedtest import speedtest_download, speedtest_page
 

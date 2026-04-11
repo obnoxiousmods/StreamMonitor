@@ -63,8 +63,8 @@ async def _fetch() -> dict:
         if (r := _parse_update_line(line.strip()))
     ]
 
-    native_total = len([l for l in native_list_raw.strip().splitlines() if l.strip()])
-    aur_total = len([l for l in aur_list_raw.strip().splitlines() if l.strip()])
+    native_total = len([line for line in native_list_raw.strip().splitlines() if line.strip()])
+    aur_total = len([line for line in aur_list_raw.strip().splitlines() if line.strip()])
 
     return {
         "native": {
