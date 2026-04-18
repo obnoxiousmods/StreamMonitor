@@ -171,7 +171,11 @@ function cx(...parts: Array<string | false | null | undefined>): string {
 }
 
 function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <section className={cx('rounded-lg border border-line bg-panel shadow-glow', className)}>{children}</section>
+  return (
+    <section className={cx('min-w-0 rounded-lg border border-line bg-panel shadow-glow', className)}>
+      {children}
+    </section>
+  )
 }
 
 function Button({
@@ -183,7 +187,7 @@ function Button({
   return (
     <button
       className={cx(
-        'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-8 sm:px-2.5 sm:py-1.5',
         variant === 'default' && 'border-accent/45 bg-accent/15 text-text hover:bg-accent/25',
         variant === 'ghost' && 'border-line bg-panel2 text-muted hover:border-accent/35 hover:text-text',
         variant === 'danger' && 'border-rose/40 bg-rose/15 text-rose hover:bg-rose/25',
@@ -217,7 +221,7 @@ function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       className={cx(
-        'min-h-8 rounded-md border border-line bg-canvas px-2.5 py-1.5 text-xs text-text outline-none transition placeholder:text-dim focus:border-accent/60',
+        'min-h-10 min-w-0 rounded-md border border-line bg-canvas px-3 py-2 text-xs text-text outline-none transition placeholder:text-dim focus:border-accent/60 sm:min-h-8 sm:px-2.5 sm:py-1.5',
         className,
       )}
       {...props}
@@ -259,11 +263,11 @@ function Dropdown({
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={cx(
-          'group inline-flex min-h-8 min-w-32 max-w-full items-center justify-between gap-2 rounded-md border border-line bg-canvas px-2.5 py-1.5 text-left text-xs font-semibold text-text outline-none transition hover:border-accent/40 focus:border-accent/60 focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-accent/55 data-[state=open]:bg-panel2',
+          'group inline-flex min-h-10 min-w-0 max-w-full items-center justify-between gap-2 rounded-md border border-line bg-canvas px-3 py-2 text-left text-xs font-semibold text-text outline-none transition hover:border-accent/40 focus:border-accent/60 focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-accent/55 data-[state=open]:bg-panel2 sm:min-h-8 sm:min-w-32 sm:px-2.5 sm:py-1.5',
           className,
         )}
       >
-        <SelectPrimitive.Value placeholder={placeholder} />
+        <SelectPrimitive.Value className="min-w-0 flex-1 truncate" placeholder={placeholder} />
         <SelectPrimitive.Icon asChild>
           <ChevronDown
             size={14}
@@ -276,7 +280,7 @@ function Dropdown({
           position="popper"
           sideOffset={6}
           collisionPadding={12}
-          className="z-[80] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-line bg-panel shadow-glow"
+          className="z-[80] min-w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-line bg-panel shadow-glow"
         >
           <SelectPrimitive.Viewport className="max-h-[min(var(--radix-select-content-available-height),22rem)] p-1">
             {options.map((option) => (
@@ -284,7 +288,7 @@ function Dropdown({
                 key={option.value || EMPTY_DROPDOWN_VALUE}
                 value={option.value === '' ? EMPTY_DROPDOWN_VALUE : option.value}
                 disabled={option.disabled}
-                className="relative flex min-h-8 cursor-pointer select-none items-center rounded-md py-1.5 pl-7 pr-2 text-xs text-muted outline-none transition data-[disabled]:pointer-events-none data-[highlighted]:bg-accent/15 data-[highlighted]:text-text data-[state=checked]:text-text data-[disabled]:opacity-40"
+                className="relative flex min-h-10 cursor-pointer select-none items-center rounded-md py-2 pl-8 pr-2 text-xs text-muted outline-none transition data-[disabled]:pointer-events-none data-[highlighted]:bg-accent/15 data-[highlighted]:text-text data-[state=checked]:text-text data-[disabled]:opacity-40 sm:min-h-8 sm:py-1.5 sm:pl-7"
               >
                 <SelectPrimitive.ItemIndicator className="absolute left-2 inline-flex items-center text-accent">
                   <Check size={13} />
@@ -326,11 +330,11 @@ function Field({
   tone?: 'ok' | 'warn' | 'err' | 'muted' | 'cyan'
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-line/60 py-1 text-xs last:border-b-0">
-      <span className="text-muted">{label}</span>
+    <div className="flex min-w-0 items-center justify-between gap-2 border-b border-line/60 py-1 text-xs last:border-b-0">
+      <span className="min-w-0 flex-1 truncate text-muted">{label}</span>
       <span
         className={cx(
-          'min-w-0 truncate text-right font-semibold text-text',
+          'min-w-0 flex-1 truncate text-right font-semibold text-text',
           tone === 'ok' && 'text-mint',
           tone === 'warn' && 'text-amber',
           tone === 'err' && 'text-rose',
@@ -356,16 +360,19 @@ function Modal({
   wide?: boolean
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3" onMouseDown={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-3"
+      onMouseDown={onClose}
+    >
       <div
         className={cx(
-          'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-glow',
-          wide ? 'max-w-6xl' : 'max-w-3xl',
+          'flex h-[92dvh] max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-lg border border-line bg-panel shadow-glow sm:h-auto sm:max-h-[94vh] sm:rounded-lg',
+          wide ? 'sm:max-w-6xl' : 'sm:max-w-3xl',
         )}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-line bg-panel2 px-3 py-2">
-          <h2 className="text-sm font-bold text-text">{title}</h2>
+        <div className="flex items-center justify-between gap-2 border-b border-line bg-panel2 px-3 py-2">
+          <h2 className="min-w-0 truncate text-sm font-bold text-text">{title}</h2>
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
@@ -437,7 +444,7 @@ function Toast({ toast }: { toast: NonNullable<ToastState> }) {
   return (
     <div
       className={cx(
-        'fixed bottom-4 right-4 z-[60] max-w-md rounded-lg border px-3 py-2 text-xs shadow-glow',
+        'fixed inset-x-2 bottom-2 z-[60] rounded-lg border px-3 py-2 text-xs shadow-glow sm:inset-x-auto sm:bottom-4 sm:right-4 sm:max-w-md',
         toast.kind === 'ok' && 'border-accent/40 bg-accent/15 text-text',
         toast.kind === 'warn' && 'border-amber/40 bg-amber/15 text-text',
         toast.kind === 'err' && 'border-rose/40 bg-rose/15 text-text',
@@ -450,10 +457,10 @@ function Toast({ toast }: { toast: NonNullable<ToastState> }) {
 
 function ThemePicker({ value, onChange }: { value: AccentThemeId; onChange: (theme: AccentThemeId) => void }) {
   return (
-    <div className="flex items-center gap-2 text-xs font-semibold uppercase text-dim">
-      <span>Theme</span>
+    <div className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase text-dim">
+      <span className="hidden sm:inline">Theme</span>
       <Dropdown
-        className="min-h-8 w-36 px-2 py-1 text-xs"
+        className="w-32 px-2 py-1 text-xs sm:min-h-8 sm:w-36"
         value={value}
         onChange={(next) => {
           if (isAccentThemeId(next)) onChange(next)
@@ -489,9 +496,9 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   })
 
   return (
-    <main className="min-h-screen bg-canvas text-text">
-      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-3 px-3 py-4 lg:grid-cols-[390px_1fr] lg:px-6">
-        <Card className="self-center p-5">
+    <main className="min-h-dvh bg-canvas text-text">
+      <div className="mx-auto grid min-h-dvh max-w-7xl grid-cols-1 content-start gap-3 px-2 py-3 sm:px-3 sm:py-4 lg:grid-cols-[390px_1fr] lg:content-center lg:px-6">
+        <Card className="self-start p-4 sm:p-5 lg:self-center">
           <div className="mb-6 flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/15 text-accent">
               <Activity />
@@ -538,7 +545,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
             </Button>
           </form>
         </Card>
-        <div className="grid content-center gap-3">
+        <div className="grid content-start gap-3 lg:content-center">
           <Card className="p-3">
             <div className="mb-3 flex items-center justify-between">
               <div>
@@ -636,16 +643,16 @@ function DashboardApp({
   const down = Object.values(status.data).filter((item) => item.current.ok === false).length
 
   return (
-    <main className="min-h-screen bg-canvas text-text">
+    <main className="min-h-dvh bg-canvas text-text">
       <header className="sticky top-0 z-40 border-b border-line bg-canvas/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[1840px] items-center gap-3 px-3 py-2">
-          <div className="flex min-w-0 items-center gap-2.5">
+        <div className="mx-auto flex max-w-[1840px] flex-wrap items-center gap-2 px-2 py-2 sm:px-3 md:flex-nowrap md:gap-3">
+          <div className="flex min-w-0 flex-1 basis-[12rem] items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
               <Activity size={17} />
             </div>
             <div className="min-w-0">
               <div className="text-sm font-black">StreamMonitor</div>
-              <div className="text-xs text-muted">Infrastructure dashboard</div>
+              <div className="truncate text-xs text-muted">Infrastructure dashboard</div>
             </div>
           </div>
           <div className="ml-auto hidden items-center gap-2 md:flex">
@@ -654,17 +661,17 @@ function DashboardApp({
             <Metric label="Updated" value={new Date().toLocaleTimeString()} compact />
           </div>
           <ThemePicker value={accentTheme} onChange={onAccentThemeChange} />
-          <Button variant="ghost" onClick={() => void logout()}>
+          <Button variant="ghost" className="px-2 sm:px-2.5" onClick={() => void logout()}>
             <LogOut size={16} />
-            Sign out
+            <span className="hidden sm:inline">Sign out</span>
           </Button>
         </div>
-        <nav className="mx-auto flex max-w-[1840px] gap-1.5 overflow-x-auto px-3 pb-2">
+        <nav className="mx-auto flex max-w-[1840px] snap-x gap-1.5 overflow-x-auto px-2 pb-2 sm:px-3">
           {TAB_ITEMS.map(([id, label, Icon]) => (
             <button
               key={id}
               className={cx(
-                'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition',
+                'inline-flex min-h-10 shrink-0 snap-start items-center gap-1.5 rounded-md border px-2.5 py-2 text-xs font-semibold transition sm:min-h-8 sm:py-1.5',
                 activeTab === id
                   ? 'border-accent/50 bg-accent/15 text-text'
                   : 'border-line bg-panel text-muted hover:border-accent/35 hover:text-text',
@@ -677,7 +684,7 @@ function DashboardApp({
           ))}
         </nav>
       </header>
-      <div className="mx-auto max-w-[1840px] px-3 py-3">
+      <div className="mx-auto max-w-[1840px] px-2 py-2 sm:px-3 sm:py-3">
         {activeTab === 'services' && (
           <ServicesPage
             bootstrap={bootstrap.data}
@@ -881,9 +888,9 @@ function SystemPanel({ stats, onOpenProcesses }: { stats: AnyRecord; onOpenProce
           <div className="grid gap-1.5 sm:grid-cols-2">
             {disks.map((disk) => (
               <div key={text(disk.mount)} className="rounded-md border border-line bg-canvas p-1.5">
-                <div className="mb-1 flex justify-between gap-2 text-xs">
-                  <span className="font-semibold">{text(disk.mount)}</span>
-                  <span className="text-muted">
+                <div className="mb-1 flex min-w-0 justify-between gap-2 text-xs">
+                  <span className="min-w-0 truncate font-semibold">{text(disk.mount)}</span>
+                  <span className="shrink-0 text-muted">
                     {text(disk.free)} / {text(disk.total)} {text(disk.unit)}
                   </span>
                 </div>
@@ -939,9 +946,9 @@ function InfoCard({
 }) {
   return (
     <Card className={cx('p-3', className)}>
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-black uppercase text-muted">
+      <div className="mb-2 flex min-w-0 items-center gap-1.5 text-xs font-black uppercase text-muted">
         {icon}
-        {title}
+        <span className="min-w-0 truncate">{title}</span>
       </div>
       {children}
     </Card>
@@ -970,12 +977,12 @@ function ProcessList({
           )
           return (
             <div key={`${text(proc.pid)}-${text(proc.name)}`} className="mb-1.5">
-              <div className="mb-1 flex items-center gap-2 text-xs">
+              <div className="mb-1 flex min-w-0 items-center gap-2 text-xs">
                 <span className="min-w-0 flex-1 truncate font-bold text-text">{text(proc.name, 'unknown')}</span>
-                <span className="font-mono text-accent">
+                <span className="shrink-0 font-mono text-accent">
                   {mode === 'cpu' ? `${value.toFixed(1)}%` : `${value.toFixed(1)}M`}
                 </span>
-                <span className="font-mono text-dim">
+                <span className="shrink-0 font-mono text-dim">
                   {mode === 'cpu' ? `${num(proc.mem_mb).toFixed(0)}M` : `${num(proc.mem_pct).toFixed(1)}%`}
                 </span>
               </div>
@@ -1010,9 +1017,9 @@ function ServiceCard({
   const highlights = pickHighlights(stats)
   return (
     <Card className="group p-3 transition hover:border-accent/40">
-      <div className="mb-2 flex items-start gap-2">
+      <div className="mb-2 flex min-w-0 items-start gap-2">
         <button className="min-w-0 flex-1 text-left" onClick={onOpen}>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <h3 className="truncate text-sm font-black">{current.name}</h3>
             <Badge tone={tone}>{current.ok === true ? 'UP' : current.ok === false ? 'DOWN' : 'PENDING'}</Badge>
           </div>
@@ -1046,7 +1053,7 @@ function ServiceCard({
         <div className="mt-2 text-xs text-amber">Stats stale: {text(meta.error, 'waiting for collector')}</div>
       )}
       <button
-        className="mt-2 text-xs font-bold text-accent opacity-0 transition group-hover:opacity-100"
+        className="mt-2 inline-flex min-h-8 items-center text-xs font-bold text-accent opacity-100 transition sm:min-h-0 sm:opacity-0 sm:group-hover:opacity-100"
         onClick={onOpen}
       >
         Details
@@ -1106,28 +1113,49 @@ function ServiceModal({
   const unit = current.unit || ''
   return (
     <Modal title={current.name} onClose={onClose} wide>
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="mb-3 flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
         {['overview', 'logs', 'controls'].map((item) => (
-          <Button key={item} variant={tab === item ? 'default' : 'ghost'} onClick={() => setTab(item)}>
+          <Button
+            key={item}
+            className="shrink-0"
+            variant={tab === item ? 'default' : 'ghost'}
+            onClick={() => setTab(item)}
+          >
             {item}
           </Button>
         ))}
         {serviceId === 'aiostreams' && (
           <>
-            <Button variant={tab === 'analyzer' ? 'default' : 'ghost'} onClick={() => setTab('analyzer')}>
+            <Button
+              className="shrink-0"
+              variant={tab === 'analyzer' ? 'default' : 'ghost'}
+              onClick={() => setTab('analyzer')}
+            >
               Analyzer
             </Button>
-            <Button variant={tab === 'tests' ? 'default' : 'ghost'} onClick={() => setTab('tests')}>
+            <Button
+              className="shrink-0"
+              variant={tab === 'tests' ? 'default' : 'ghost'}
+              onClick={() => setTab('tests')}
+            >
               Test Suite
             </Button>
           </>
         )}
         {serviceId === 'mediafusion' && (
           <>
-            <Button variant={tab === 'metrics' ? 'default' : 'ghost'} onClick={() => setTab('metrics')}>
+            <Button
+              className="shrink-0"
+              variant={tab === 'metrics' ? 'default' : 'ghost'}
+              onClick={() => setTab('metrics')}
+            >
               Metrics
             </Button>
-            <Button variant={tab === 'scraper' ? 'default' : 'ghost'} onClick={() => setTab('scraper')}>
+            <Button
+              className="shrink-0"
+              variant={tab === 'scraper' ? 'default' : 'ghost'}
+              onClick={() => setTab('scraper')}
+            >
               Scraper Analyzer
             </Button>
           </>
@@ -1185,8 +1213,9 @@ function LogViewer({ unit }: { unit: string }) {
   if (!unit) return <div className="text-muted">No systemd unit configured.</div>
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
         <Dropdown
+          className="w-full sm:w-auto"
           value={lines}
           onChange={setLines}
           options={[
@@ -1197,13 +1226,18 @@ function LogViewer({ unit }: { unit: string }) {
           ]}
           ariaLabel="Log line count"
         />
-        <Input placeholder="Filter logs" value={filter} onChange={(event) => setFilter(event.target.value)} />
+        <Input
+          className="w-full sm:w-64"
+          placeholder="Filter logs"
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+        />
         <Button variant="ghost" onClick={() => void logs.refetch()}>
           <RefreshCw size={16} />
           Refresh
         </Button>
       </div>
-      <pre className="max-h-[58vh] overflow-auto rounded-lg border border-line bg-canvas p-3 font-mono text-xs leading-relaxed text-muted">
+      <pre className="max-h-[58dvh] max-w-full overflow-auto rounded-lg border border-line bg-canvas p-3 font-mono text-xs leading-relaxed text-muted sm:max-h-[58vh]">
         {logs.isLoading ? 'Loading logs...' : filtered.join('\n') || 'No log lines.'}
       </pre>
     </div>
@@ -1241,7 +1275,9 @@ function ServiceControls({
           Restart
         </Button>
       </div>
-      <pre className="rounded-lg border border-line bg-canvas p-3 text-xs text-muted">{output}</pre>
+      <pre className="max-w-full overflow-auto rounded-lg border border-line bg-canvas p-3 text-xs text-muted">
+        {output}
+      </pre>
     </div>
   )
 }
@@ -1250,7 +1286,7 @@ function JsonPanel({ title, data }: { title: string; data: unknown }) {
   return (
     <Card className="p-3">
       <h3 className="mb-2 text-xs font-black uppercase text-muted">{title}</h3>
-      <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg bg-canvas p-3 font-mono text-xs text-muted">
+      <pre className="max-h-[60dvh] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas p-3 font-mono text-xs text-muted sm:max-h-[60vh]">
         {JSON.stringify(data, null, 2)}
       </pre>
     </Card>
@@ -1261,7 +1297,7 @@ function LogsPage({ units }: { units: Bootstrap['log_units'] }) {
   const [unit, setUnit] = useState(units[0]?.unit || '')
   return (
     <Card className="p-3">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex min-w-0 items-center gap-2">
         <Terminal className="text-accent" size={16} />
         <h2 className="text-base font-black">Live logs</h2>
       </div>
@@ -1308,7 +1344,7 @@ function PermissionsPage({ notify }: { notify: (message: string, kind?: 'ok' | '
   }
   return (
     <Card className="p-3">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
         <Button onClick={() => scan.mutate()} disabled={scan.isPending}>
           <RefreshCw size={16} />
           Scan directories
@@ -1378,14 +1414,16 @@ function ErrorsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'warn'
   }
   return (
     <Card className="p-3">
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
         <Dropdown
+          className="w-full sm:w-auto"
           value={service}
           onChange={setService}
           options={[{ value: '', label: 'All services' }, ...services.map((item) => ({ value: item, label: item }))]}
           ariaLabel="Error service filter"
         />
         <Dropdown
+          className="w-full sm:w-auto"
           value={severity}
           onChange={setSeverity}
           options={[
@@ -1396,6 +1434,7 @@ function ErrorsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'warn'
           ariaLabel="Error severity filter"
         />
         <Dropdown
+          className="w-full sm:w-auto"
           value={sort}
           onChange={setSort}
           options={[
@@ -1413,11 +1452,13 @@ function ErrorsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'warn'
       <div className="space-y-2">
         {filtered.map((row, index) => (
           <details key={index} className="rounded-md border border-line bg-canvas p-2.5">
-            <summary className="cursor-pointer text-xs">
+            <summary className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-xs">
               <Badge tone={text(row.severity) === 'error' ? 'err' : 'warn'}>{text(row.severity, 'event')}</Badge>
-              <span className="ml-2 font-bold">{text(row.sid || row.service, 'unknown')}</span>
-              <span className="ml-2 text-muted">{text(row.timestamp || row.ts)}</span>
-              <span className="ml-2 text-muted">{text(row.line || row.message).slice(0, 140)}</span>
+              <span className="font-bold">{text(row.sid || row.service, 'unknown')}</span>
+              <span className="text-muted">{text(row.timestamp || row.ts)}</span>
+              <span className="min-w-full break-words text-muted sm:min-w-0 sm:flex-1">
+                {text(row.line || row.message).slice(0, 140)}
+              </span>
             </summary>
             <pre className="mt-3 whitespace-pre-wrap text-xs text-muted">{JSON.stringify(row, null, 2)}</pre>
           </details>
@@ -1485,18 +1526,21 @@ function SettingsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'war
         <h2 className="mb-3 text-base font-black">Password</h2>
         <div className="grid gap-2 md:grid-cols-3">
           <Input
+            className="w-full"
             type="password"
             placeholder="Current"
             value={passwords.current}
             onChange={(event) => setPasswords({ ...passwords, current: event.target.value })}
           />
           <Input
+            className="w-full"
             type="password"
             placeholder="New"
             value={passwords.next}
             onChange={(event) => setPasswords({ ...passwords, next: event.target.value })}
           />
           <Input
+            className="w-full"
             type="password"
             placeholder="Confirm"
             value={passwords.confirm}
@@ -1533,7 +1577,7 @@ function EditableRegistry({
   }, {})
   return (
     <Card className="p-3">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
         <h2 className="text-base font-black">{title}</h2>
         <Button onClick={onSave}>Save</Button>
       </div>
@@ -1546,6 +1590,7 @@ function EditableRegistry({
                 <label key={key} className="grid gap-1 text-xs text-muted">
                   {text(value.label, key)}
                   <Input
+                    className="w-full"
                     type={secret ? 'password' : 'text'}
                     value={values[key] || ''}
                     onChange={(event) => setValues({ ...values, [key]: event.target.value })}
@@ -1598,13 +1643,14 @@ function SpeedTestCard({ config, compact }: { config: SpeedConfig; compact?: boo
   }
   return (
     <Card className="p-3">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-between">
         <div>
           <h2 className="text-base font-black">Speed test</h2>
           <p className="text-xs text-muted">Direct and proxied download checks</p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:flex">
           <Dropdown
+            className="w-full sm:w-auto"
             value={size}
             onChange={setSize}
             options={['10', '25', '50', '100', '250', '500'].map((value) => ({ value, label: `${value} MB` }))}
@@ -1625,7 +1671,9 @@ function SpeedTestCard({ config, compact }: { config: SpeedConfig; compact?: boo
                 <span className="font-mono text-accent">{result ? `${result.mbps.toFixed(1)} Mbps` : '-'}</span>
               </div>
               <Progress value={result ? Math.min(result.mbps / 10, 100) : 0} tone="cyan" />
-              <div className="mt-2 text-xs text-muted">{result ? `${result.seconds.toFixed(2)}s` : endpoint.url}</div>
+              <div className="mt-2 break-all text-xs text-muted">
+                {result ? `${result.seconds.toFixed(2)}s` : endpoint.url}
+              </div>
             </div>
           )
         })}
@@ -1653,7 +1701,7 @@ function BenchmarkPage({ titles }: { titles: Record<string, string> }) {
   }
   return (
     <Card className="p-3">
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
         <Dropdown
           className="w-full sm:w-80"
           value={imdb}
@@ -1663,6 +1711,7 @@ function BenchmarkPage({ titles }: { titles: Record<string, string> }) {
           ariaLabel="Benchmark title"
         />
         <Dropdown
+          className="w-full sm:w-auto"
           value={mode}
           onChange={setMode}
           options={[
@@ -1715,7 +1764,7 @@ function ApiExplorer() {
               onClick={() => void tryEndpoint(method, path)}
             >
               <Badge tone={method === 'GET' ? 'cyan' : 'warn'}>{method}</Badge>
-              <span className="font-mono text-xs text-text">{path}</span>
+              <span className="min-w-0 break-all font-mono text-xs text-text">{path}</span>
             </button>
           ))}
         </div>
@@ -1743,7 +1792,7 @@ function PackagesPage() {
   const rows = showAll ? [...summary, ...nativeUpdates, ...aurUpdates] : [...nativeUpdates, ...aurUpdates]
   return (
     <Card className="p-3">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
         <Button onClick={() => void packages.refetch()}>Check now</Button>
         <label className="flex items-center gap-2 text-xs text-muted">
           <input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />
@@ -1774,8 +1823,9 @@ function Analyzer({ endpoint, logUnit, title }: { endpoint: string; logUnit?: st
   }
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
         <Dropdown
+          className="w-full sm:w-auto"
           value={lines}
           onChange={setLines}
           options={['1000', '2000', '5000', '10000', '25000', '50000'].map((value) => ({
@@ -1806,8 +1856,9 @@ function AioTestSuite() {
   }
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
         <Dropdown
+          className="w-full sm:w-auto"
           value={type}
           onChange={setType}
           options={[
@@ -1817,6 +1868,7 @@ function AioTestSuite() {
           ariaLabel="AIOStreams test type"
         />
         <Input
+          className="w-full sm:w-80"
           value={imdb}
           onChange={(event) => setImdb(event.target.value)}
           placeholder="tt0468569 or tt0903747:3:7"
@@ -1878,41 +1930,72 @@ function DataTable({
   if (!rows.length)
     return <div className="rounded-lg border border-line bg-canvas p-3 text-xs text-muted">No data.</div>
   return (
-    <div className="overflow-auto rounded-lg border border-line">
-      <table className="min-w-full border-collapse text-xs">
-        <thead className="bg-panel2 text-xs uppercase text-muted">
-          <tr>
-            {selectable && <th className="p-1.5 text-left">Select</th>}
-            {columns.map((column) => (
-              <th key={column} className="p-1.5 text-left">
-                {column.replace(/_/g, ' ')}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={index} className="border-t border-line bg-canvas/60">
-              {selectable && (
-                <td className="p-1.5">
-                  <input
-                    type="checkbox"
-                    checked={selectable.selected.has(index)}
-                    onChange={() => selectable.onToggle(index)}
-                  />
-                </td>
-              )}
+    <div className="max-w-full">
+      <div className="grid gap-2 sm:hidden">
+        {rows.map((row, index) => (
+          <div key={index} className="rounded-lg border border-line bg-canvas p-2.5 text-xs">
+            {selectable && (
+              <label className="mb-2 flex items-center gap-2 text-muted">
+                <input
+                  type="checkbox"
+                  checked={selectable.selected.has(index)}
+                  onChange={() => selectable.onToggle(index)}
+                />
+                Select
+              </label>
+            )}
+            <div className="grid gap-1.5">
               {columns.map((column) => (
-                <td key={column} className="max-w-[26rem] truncate p-1.5 text-muted" title={text(row[column])}>
-                  {typeof row[column] === 'boolean' ? (row[column] ? 'yes' : 'no') : text(row[column], '-')}
-                </td>
+                <div key={column} className="grid min-w-0 grid-cols-[6.5rem_1fr] gap-2">
+                  <span className="truncate font-semibold uppercase text-dim">{column.replace(/_/g, ' ')}</span>
+                  <span className="min-w-0 break-words text-muted">{formatCell(row[column])}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="hidden overflow-auto rounded-lg border border-line sm:block">
+        <table className="min-w-full border-collapse text-xs">
+          <thead className="bg-panel2 text-xs uppercase text-muted">
+            <tr>
+              {selectable && <th className="p-1.5 text-left">Select</th>}
+              {columns.map((column) => (
+                <th key={column} className="p-1.5 text-left">
+                  {column.replace(/_/g, ' ')}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={index} className="border-t border-line bg-canvas/60">
+                {selectable && (
+                  <td className="p-1.5">
+                    <input
+                      type="checkbox"
+                      checked={selectable.selected.has(index)}
+                      onChange={() => selectable.onToggle(index)}
+                    />
+                  </td>
+                )}
+                {columns.map((column) => (
+                  <td key={column} className="max-w-[26rem] truncate p-1.5 text-muted" title={text(row[column])}>
+                    {formatCell(row[column])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
+}
+
+function formatCell(value: unknown): string {
+  if (typeof value === 'boolean') return value ? 'yes' : 'no'
+  return text(value, '-')
 }
 
 export default App

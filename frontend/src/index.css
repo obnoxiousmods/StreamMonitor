@@ -19,7 +19,7 @@
 
   color: #e7eee9;
   background: #080909;
-  font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, 'Segoe UI', Roboto, Arial, sans-serif;
   font-synthesis: none;
   text-rendering: optimizelegibility;
   color-scheme: dark;
@@ -27,39 +27,39 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-html[data-accent-theme="lilac"] {
+html[data-accent-theme='lilac'] {
   --color-accent: 224 191 255;
 }
 
-html[data-accent-theme="rose"] {
+html[data-accent-theme='rose'] {
   --color-accent: 255 183 210;
 }
 
-html[data-accent-theme="peach"] {
+html[data-accent-theme='peach'] {
   --color-accent: 255 197 164;
 }
 
-html[data-accent-theme="mint"] {
+html[data-accent-theme='mint'] {
   --color-accent: 166 235 201;
 }
 
-html[data-accent-theme="aqua"] {
+html[data-accent-theme='aqua'] {
   --color-accent: 151 228 225;
 }
 
-html[data-accent-theme="sky"] {
+html[data-accent-theme='sky'] {
   --color-accent: 164 211 255;
 }
 
-html[data-accent-theme="lemon"] {
+html[data-accent-theme='lemon'] {
   --color-accent: 241 226 132;
 }
 
-html[data-accent-theme="coral"] {
+html[data-accent-theme='coral'] {
   --color-accent: 255 160 154;
 }
 
-html[data-accent-theme="periwinkle"] {
+html[data-accent-theme='periwinkle'] {
   --color-accent: 178 191 255;
 }
 
@@ -69,12 +69,16 @@ html[data-accent-theme="periwinkle"] {
 
 html {
   min-width: 320px;
+  max-width: 100%;
   background: #080909;
+  text-size-adjust: 100%;
 }
 
 body {
   min-width: 320px;
+  max-width: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   background:
     radial-gradient(circle at 10% 2%, rgb(var(--color-accent) / 0.13), transparent 28rem),
@@ -84,6 +88,8 @@ body {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
+  max-width: 100%;
 }
 
 button,
@@ -103,6 +109,17 @@ button:disabled {
 
 a {
   color: inherit;
+}
+
+input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: rgb(var(--color-accent));
+}
+
+pre,
+code {
+  overflow-wrap: anywhere;
 }
 
 ::selection {

@@ -12,10 +12,13 @@
     "lint:js": "eslint --config frontend/eslint.config.js frontend/src frontend/vite.config.ts",
     "lint:css": "stylelint \"frontend/src/**/*.css\"",
     "format": "prettier --write frontend/src frontend/index.html frontend/vite.config.ts",
-    "lint": "npm run typecheck && npm run lint:js && npm run lint:css"
+    "lint": "npm run typecheck && npm run lint:js && npm run lint:css",
+    "test:responsive": "playwright test --config frontend/playwright.config.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.57.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
