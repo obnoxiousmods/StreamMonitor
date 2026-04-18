@@ -2,6 +2,8 @@ import {
   Activity,
   AlertTriangle,
   Boxes,
+  Check,
+  ChevronDown,
   Cpu,
   Database,
   Gauge,
@@ -17,8 +19,9 @@ import {
   Terminal,
   Zap,
 } from 'lucide-react'
+import * as SelectPrimitive from '@radix-ui/react-select'
 import { useMemo, useState } from 'react'
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 type AnyRecord = Record<string, unknown>
@@ -62,6 +65,7 @@ type ToastState = { message: string; kind: 'ok' | 'warn' | 'err' } | null
 const STATUS_REFRESH_MS = 5000
 const STATS_REFRESH_MS = 15000
 const VERSION_REFRESH_MS = 300000
+const EMPTY_DROPDOWN_VALUE = '__streammonitor_empty__'
 
 const TAB_ITEMS = [
   ['services', 'Services', Server],
@@ -155,7 +159,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const contentType = response.headers.get('content-type') || ''
   const body = contentType.includes('json') ? await response.json() : await response.text()
   if (!response.ok) {
-    const message = typeof body === 'object' && body && 'error' in body ? String((body as AnyRecord).error) : response.statusText
+    const message =
+      typeof body === 'object' && body && 'error' in body ? String((body as AnyRecord).error) : response.statusText
     throw new Error(message)
   }
   return body as T
@@ -220,15 +225,77 @@ function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
-function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+type DropdownOption = {
+  value: string
+  label: ReactNode
+  disabled?: boolean
+}
+
+function Dropdown({
+  value,
+  onChange,
+  options,
+  placeholder = 'Select',
+  className,
+  disabled,
+  ariaLabel,
+}: {
+  value: string
+  onChange: (value: string) => void
+  options: DropdownOption[]
+  placeholder?: string
+  className?: string
+  disabled?: boolean
+  ariaLabel?: string
+}) {
+  const hasEmptyOption = options.some((option) => option.value === '')
+  const radixValue = value === '' ? (hasEmptyOption ? EMPTY_DROPDOWN_VALUE : undefined) : value
   return (
-    <select
-      className={cx(
-        'min-h-8 rounded-md border border-line bg-canvas px-2.5 py-1.5 text-xs text-text outline-none transition focus:border-accent/60',
-        className,
-      )}
-      {...props}
-    />
+    <SelectPrimitive.Root
+      value={radixValue}
+      onValueChange={(next) => onChange(next === EMPTY_DROPDOWN_VALUE ? '' : next)}
+      disabled={disabled || options.length === 0}
+    >
+      <SelectPrimitive.Trigger
+        aria-label={ariaLabel}
+        className={cx(
+          'group inline-flex min-h-8 min-w-32 max-w-full items-center justify-between gap-2 rounded-md border border-line bg-canvas px-2.5 py-1.5 text-left text-xs font-semibold text-text outline-none transition hover:border-accent/40 focus:border-accent/60 focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:border-accent/55 data-[state=open]:bg-panel2',
+          className,
+        )}
+      >
+        <SelectPrimitive.Value placeholder={placeholder} />
+        <SelectPrimitive.Icon asChild>
+          <ChevronDown
+            size={14}
+            className="shrink-0 text-dim transition group-data-[state=open]:rotate-180 group-data-[state=open]:text-accent"
+          />
+        </SelectPrimitive.Icon>
+      </SelectPrimitive.Trigger>
+      <SelectPrimitive.Portal>
+        <SelectPrimitive.Content
+          position="popper"
+          sideOffset={6}
+          collisionPadding={12}
+          className="z-[80] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-line bg-panel shadow-glow"
+        >
+          <SelectPrimitive.Viewport className="max-h-[min(var(--radix-select-content-available-height),22rem)] p-1">
+            {options.map((option) => (
+              <SelectPrimitive.Item
+                key={option.value || EMPTY_DROPDOWN_VALUE}
+                value={option.value === '' ? EMPTY_DROPDOWN_VALUE : option.value}
+                disabled={option.disabled}
+                className="relative flex min-h-8 cursor-pointer select-none items-center rounded-md py-1.5 pl-7 pr-2 text-xs text-muted outline-none transition data-[disabled]:pointer-events-none data-[highlighted]:bg-accent/15 data-[highlighted]:text-text data-[state=checked]:text-text data-[disabled]:opacity-40"
+              >
+                <SelectPrimitive.ItemIndicator className="absolute left-2 inline-flex items-center text-accent">
+                  <Check size={13} />
+                </SelectPrimitive.ItemIndicator>
+                <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
+              </SelectPrimitive.Item>
+            ))}
+          </SelectPrimitive.Viewport>
+        </SelectPrimitive.Content>
+      </SelectPrimitive.Portal>
+    </SelectPrimitive.Root>
   )
 }
 
@@ -249,7 +316,15 @@ function Progress({ value, tone = 'ok' }: { value: number; tone?: 'ok' | 'warn' 
   )
 }
 
-function Field({ label, value, tone }: { label: string; value: ReactNode; tone?: 'ok' | 'warn' | 'err' | 'muted' | 'cyan' }) {
+function Field({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: ReactNode
+  tone?: 'ok' | 'warn' | 'err' | 'muted' | 'cyan'
+}) {
   return (
     <div className="flex items-center justify-between gap-2 border-b border-line/60 py-1 text-xs last:border-b-0">
       <span className="text-muted">{label}</span>
@@ -283,7 +358,10 @@ function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3" onMouseDown={onClose}>
       <div
-        className={cx('flex max-h-[94vh] w-full flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-glow', wide ? 'max-w-6xl' : 'max-w-3xl')}
+        className={cx(
+          'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-glow',
+          wide ? 'max-w-6xl' : 'max-w-3xl',
+        )}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-line bg-panel2 px-3 py-2">
@@ -370,31 +448,20 @@ function Toast({ toast }: { toast: NonNullable<ToastState> }) {
   )
 }
 
-function ThemePicker({
-  value,
-  onChange,
-}: {
-  value: AccentThemeId
-  onChange: (theme: AccentThemeId) => void
-}) {
+function ThemePicker({ value, onChange }: { value: AccentThemeId; onChange: (theme: AccentThemeId) => void }) {
   return (
-    <label className="flex items-center gap-2 text-xs font-semibold uppercase text-dim">
-      Theme
-      <Select
+    <div className="flex items-center gap-2 text-xs font-semibold uppercase text-dim">
+      <span>Theme</span>
+      <Dropdown
         className="min-h-8 w-36 px-2 py-1 text-xs"
         value={value}
-        onChange={(event) => {
-          const next = event.target.value
+        onChange={(next) => {
           if (isAccentThemeId(next)) onChange(next)
         }}
-      >
-        {ACCENT_THEMES.map((theme) => (
-          <option key={theme.id} value={theme.id}>
-            {theme.label}
-          </option>
-        ))}
-      </Select>
-    </label>
+        options={ACCENT_THEMES.map((theme) => ({ value: theme.id, label: theme.label }))}
+        ariaLabel="Theme"
+      />
+    </div>
   )
 }
 
@@ -444,7 +511,12 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
           >
             <label className="block text-xs font-semibold text-muted">
               Username
-              <Input className="mt-2 w-full" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
+              <Input
+                className="mt-2 w-full"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                autoComplete="username"
+              />
             </label>
             <label className="block text-xs font-semibold text-muted">
               Password
@@ -457,7 +529,9 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
                 autoFocus
               />
             </label>
-            {error && <div className="rounded-md border border-rose/40 bg-rose/10 px-3 py-2 text-xs text-rose">{error}</div>}
+            {error && (
+              <div className="rounded-md border border-rose/40 bg-rose/10 px-3 py-2 text-xs text-rose">{error}</div>
+            )}
             <Button className="w-full" disabled={login.isPending}>
               <KeyRound size={16} />
               {login.isPending ? 'Signing in...' : 'Sign in'}
@@ -478,7 +552,11 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
               <Metric label="Services" value={num(publicStatus.data?.total)} />
               <Metric label="Online" value={num(publicStatus.data?.up)} tone="ok" />
-              <Metric label="Issues" value={num(publicStatus.data?.down)} tone={num(publicStatus.data?.down) ? 'warn' : 'ok'} />
+              <Metric
+                label="Issues"
+                value={num(publicStatus.data?.down)}
+                tone={num(publicStatus.data?.down) ? 'warn' : 'ok'}
+              />
               <Metric label="Uptime" value={pct(publicStatus.data?.uptime_pct)} tone="cyan" />
             </div>
           </Card>
@@ -587,7 +665,9 @@ function DashboardApp({
               key={id}
               className={cx(
                 'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition',
-                activeTab === id ? 'border-accent/50 bg-accent/15 text-text' : 'border-line bg-panel text-muted hover:border-accent/35 hover:text-text',
+                activeTab === id
+                  ? 'border-accent/50 bg-accent/15 text-text'
+                  : 'border-line bg-panel text-muted hover:border-accent/35 hover:text-text',
               )}
               onClick={() => switchTab(id)}
             >
@@ -648,7 +728,15 @@ function Metric({
 }) {
   return (
     <div className={cx('rounded-md border border-line bg-panel2 px-2.5 py-1.5', compact ? 'min-w-20' : '')}>
-      <div className={cx('text-sm font-black', tone === 'ok' && 'text-mint', tone === 'warn' && 'text-amber', tone === 'err' && 'text-rose', tone === 'cyan' && 'text-cyan')}>
+      <div
+        className={cx(
+          'text-sm font-black',
+          tone === 'ok' && 'text-mint',
+          tone === 'warn' && 'text-amber',
+          tone === 'err' && 'text-rose',
+          tone === 'cyan' && 'text-cyan',
+        )}
+      >
         {value}
       </div>
       <div className="text-[11px] font-semibold uppercase text-dim">{label}</div>
@@ -737,22 +825,45 @@ function SystemPanel({ stats, onOpenProcesses }: { stats: AnyRecord; onOpenProce
         <InfoCard title="CPU" icon={<Cpu size={16} />}>
           <Field label="Model" value={text(cpu.model, 'Unknown')} />
           <Field label="Cores / Threads" value={`${text(cpu.physical_cores, '?')} / ${text(cpu.logical_cores, '?')}`} />
-          <Field label="Usage" value={pct(cpu.usage_pct)} tone={num(cpu.usage_pct) > 80 ? 'err' : num(cpu.usage_pct) > 50 ? 'warn' : 'ok'} />
-          <Progress value={num(cpu.usage_pct)} tone={num(cpu.usage_pct) > 80 ? 'err' : num(cpu.usage_pct) > 50 ? 'warn' : 'ok'} />
-          <Field label="Load" value={`${text(cpu.load_1m, '0')} / ${text(cpu.load_5m, '0')} / ${text(cpu.load_15m, '0')}`} />
+          <Field
+            label="Usage"
+            value={pct(cpu.usage_pct)}
+            tone={num(cpu.usage_pct) > 80 ? 'err' : num(cpu.usage_pct) > 50 ? 'warn' : 'ok'}
+          />
+          <Progress
+            value={num(cpu.usage_pct)}
+            tone={num(cpu.usage_pct) > 80 ? 'err' : num(cpu.usage_pct) > 50 ? 'warn' : 'ok'}
+          />
+          <Field
+            label="Load"
+            value={`${text(cpu.load_1m, '0')} / ${text(cpu.load_5m, '0')} / ${text(cpu.load_15m, '0')}`}
+          />
         </InfoCard>
         <InfoCard title="Memory" icon={<Database size={16} />}>
           <Field label="Used / Total" value={`${gb(ram.used_gb)} / ${gb(ram.total_gb)}`} />
-          <Progress value={num(ram.percent)} tone={num(ram.percent) > 90 ? 'err' : num(ram.percent) > 70 ? 'warn' : 'ok'} />
+          <Progress
+            value={num(ram.percent)}
+            tone={num(ram.percent) > 90 ? 'err' : num(ram.percent) > 70 ? 'warn' : 'ok'}
+          />
           <Field label="Available" value={gb(ram.available_gb)} tone="ok" />
-          {num(swap.total_gb) > 0 && <Field label="Swap active / total" value={`${gb(swap.active_gb)} / ${gb(swap.total_gb)}`} />}
+          {num(swap.total_gb) > 0 && (
+            <Field label="Swap active / total" value={`${gb(swap.active_gb)} / ${gb(swap.total_gb)}`} />
+          )}
           {num(swap.cached_gb) > 0 && <Field label="Swap cached" value={gb(swap.cached_gb)} tone="ok" />}
         </InfoCard>
         <InfoCard title="GPU" icon={<Gauge size={16} />}>
           <div className="mb-1.5 text-xs text-muted">{text(gpu.name, 'No GPU detected')}</div>
-          <Field label="Usage" value={pct(gpu.usage_pct)} tone={num(gpu.usage_pct) > 80 ? 'err' : num(gpu.usage_pct) > 0 ? 'ok' : 'muted'} />
+          <Field
+            label="Usage"
+            value={pct(gpu.usage_pct)}
+            tone={num(gpu.usage_pct) > 80 ? 'err' : num(gpu.usage_pct) > 0 ? 'ok' : 'muted'}
+          />
           <Progress value={num(gpu.usage_pct)} tone="ok" />
-          <Field label="Encode / Decode" value={`${encoderPct}% / ${decoderPct}%`} tone={encoderPct || decoderPct ? 'cyan' : 'muted'} />
+          <Field
+            label="Encode / Decode"
+            value={`${encoderPct}% / ${decoderPct}%`}
+            tone={encoderPct || decoderPct ? 'cyan' : 'muted'}
+          />
           <Field label="Memory busy" value={pct(gpu.mem_busy_pct)} />
           <Field label="VRAM" value={`${text(gpu.vram_used_mb, 0)} / ${text(gpu.vram_total_mb, 0)} MB`} />
           <Field label="Temp" value={`${text(gpu.temp_c, '?')}C`} tone={num(gpu.temp_c) > 80 ? 'warn' : 'ok'} />
@@ -776,7 +887,10 @@ function SystemPanel({ stats, onOpenProcesses }: { stats: AnyRecord; onOpenProce
                     {text(disk.free)} / {text(disk.total)} {text(disk.unit)}
                   </span>
                 </div>
-                <Progress value={num(disk.percent)} tone={num(disk.percent) > 90 ? 'err' : num(disk.percent) > 75 ? 'warn' : 'ok'} />
+                <Progress
+                  value={num(disk.percent)}
+                  tone={num(disk.percent) > 90 ? 'err' : num(disk.percent) > 75 ? 'warn' : 'ok'}
+                />
               </div>
             ))}
           </div>
@@ -834,19 +948,36 @@ function InfoCard({
   )
 }
 
-function ProcessList({ title, processes, mode, onClick }: { title: string; processes: AnyRecord[]; mode: 'cpu' | 'ram'; onClick: () => void }) {
+function ProcessList({
+  title,
+  processes,
+  mode,
+  onClick,
+}: {
+  title: string
+  processes: AnyRecord[]
+  mode: 'cpu' | 'ram'
+  onClick: () => void
+}) {
   return (
     <InfoCard title={title} icon={<Activity size={16} />}>
       <button className="w-full text-left" onClick={onClick}>
         {processes.slice(0, 10).map((proc) => {
           const value = mode === 'cpu' ? num(proc.cpu_pct) : num(proc.mem_mb)
-          const max = Math.max(...processes.slice(0, 10).map((item) => (mode === 'cpu' ? num(item.cpu_pct) : num(item.mem_mb))), 0.1)
+          const max = Math.max(
+            ...processes.slice(0, 10).map((item) => (mode === 'cpu' ? num(item.cpu_pct) : num(item.mem_mb))),
+            0.1,
+          )
           return (
             <div key={`${text(proc.pid)}-${text(proc.name)}`} className="mb-1.5">
               <div className="mb-1 flex items-center gap-2 text-xs">
                 <span className="min-w-0 flex-1 truncate font-bold text-text">{text(proc.name, 'unknown')}</span>
-                <span className="font-mono text-accent">{mode === 'cpu' ? `${value.toFixed(1)}%` : `${value.toFixed(1)}M`}</span>
-                <span className="font-mono text-dim">{mode === 'cpu' ? `${num(proc.mem_mb).toFixed(0)}M` : `${num(proc.mem_pct).toFixed(1)}%`}</span>
+                <span className="font-mono text-accent">
+                  {mode === 'cpu' ? `${value.toFixed(1)}%` : `${value.toFixed(1)}M`}
+                </span>
+                <span className="font-mono text-dim">
+                  {mode === 'cpu' ? `${num(proc.mem_mb).toFixed(0)}M` : `${num(proc.mem_pct).toFixed(1)}%`}
+                </span>
               </div>
               <Progress value={(value / max) * 100} tone={mode === 'cpu' && value > 100 ? 'warn' : 'ok'} />
             </div>
@@ -888,14 +1019,22 @@ function ServiceCard({
           <p className="mt-1 truncate text-xs text-muted">{current.message || 'No status message'}</p>
         </button>
         {webUrl && (
-          <Button variant="ghost" className="min-h-7 px-2 py-1" onClick={() => window.open(webUrl, '_blank', 'noopener')}>
+          <Button
+            variant="ghost"
+            className="min-h-7 px-2 py-1"
+            onClick={() => window.open(webUrl, '_blank', 'noopener')}
+          >
             Open
           </Button>
         )}
       </div>
       <HistoryBar history={status.history} />
       <div className="mt-2 grid grid-cols-2 gap-1.5">
-        <Metric label="Latency" value={current.latency_ms != null ? `${current.latency_ms}ms` : '-'} tone={tone === 'err' ? 'err' : 'cyan'} />
+        <Metric
+          label="Latency"
+          value={current.latency_ms != null ? `${current.latency_ms}ms` : '-'}
+          tone={tone === 'err' ? 'err' : 'cyan'}
+        />
         <Metric label="Version" value={text(version.installed || version.latest, '-')} />
       </div>
       <div className="mt-2 grid gap-0.5">
@@ -903,8 +1042,13 @@ function ServiceCard({
           <Field key={key} label={key} value={String(value)} />
         ))}
       </div>
-      {meta.stale === true && <div className="mt-2 text-xs text-amber">Stats stale: {text(meta.error, 'waiting for collector')}</div>}
-      <button className="mt-2 text-xs font-bold text-accent opacity-0 transition group-hover:opacity-100" onClick={onOpen}>
+      {meta.stale === true && (
+        <div className="mt-2 text-xs text-amber">Stats stale: {text(meta.error, 'waiting for collector')}</div>
+      )}
+      <button
+        className="mt-2 text-xs font-bold text-accent opacity-0 transition group-hover:opacity-100"
+        onClick={onOpen}
+      >
         Details
       </button>
       <span className="sr-only">{id}</span>
@@ -919,7 +1063,12 @@ function HistoryBar({ history }: { history: Array<boolean | number | null> }) {
       {recent.map((item, index) => {
         const ok = item === true || item === 1
         const bad = item === false || item === 0
-        return <span key={index} className={cx('h-full flex-1 rounded-sm', ok && 'bg-mint', bad && 'bg-rose', !ok && !bad && 'bg-panel3')} />
+        return (
+          <span
+            key={index}
+            className={cx('h-full flex-1 rounded-sm', ok && 'bg-mint', bad && 'bg-rose', !ok && !bad && 'bg-panel3')}
+          />
+        )
       })}
     </div>
   )
@@ -928,7 +1077,9 @@ function HistoryBar({ history }: { history: Array<boolean | number | null> }) {
 function pickHighlights(stats: AnyRecord): Array<[string, unknown]> {
   const ignored = new Set(['health_messages', 'now_playing', 'libraries', 'disks', 'gpu', 'cpu', 'ram', 'swap'])
   return Object.entries(stats)
-    .filter(([key, value]) => !ignored.has(key) && value != null && ['string', 'number', 'boolean'].includes(typeof value))
+    .filter(
+      ([key, value]) => !ignored.has(key) && value != null && ['string', 'number', 'boolean'].includes(typeof value),
+    )
     .slice(0, 4)
     .map(([key, value]) => [key.replace(/_/g, ' '), value])
 }
@@ -985,7 +1136,10 @@ function ServiceModal({
       {tab === 'overview' && (
         <div className="grid gap-3 lg:grid-cols-2">
           <Card className="p-3">
-            <Field label="Status" value={current.ok === true ? 'Healthy' : current.ok === false ? 'Unhealthy' : 'Pending'} />
+            <Field
+              label="Status"
+              value={current.ok === true ? 'Healthy' : current.ok === false ? 'Unhealthy' : 'Pending'}
+            />
             <Field label="Systemd" value={current.systemd || '-'} />
             <Field label="Latency" value={current.latency_ms != null ? `${current.latency_ms}ms` : '-'} />
             <Field label="Unit" value={unit || '-'} />
@@ -1002,10 +1156,18 @@ function ServiceModal({
       )}
       {tab === 'logs' && <LogViewer unit={unit} />}
       {tab === 'controls' && <ServiceControls unit={unit} notify={notify} />}
-      {tab === 'analyzer' && <Analyzer endpoint="/api/aiostreams/analyze" logUnit="aiostreams" title="AIOStreams analyzer" />}
+      {tab === 'analyzer' && (
+        <Analyzer endpoint="/api/aiostreams/analyze" logUnit="aiostreams" title="AIOStreams analyzer" />
+      )}
       {tab === 'tests' && <AioTestSuite />}
       {tab === 'metrics' && <Analyzer endpoint="/api/mediafusion/metrics" title="MediaFusion metrics" />}
-      {tab === 'scraper' && <Analyzer endpoint="/api/mediafusion/analyze" logUnit="mediafusion-taskiq-scrapy" title="MediaFusion scraper analyzer" />}
+      {tab === 'scraper' && (
+        <Analyzer
+          endpoint="/api/mediafusion/analyze"
+          logUnit="mediafusion-taskiq-scrapy"
+          title="MediaFusion scraper analyzer"
+        />
+      )}
     </Modal>
   )
 }
@@ -1024,12 +1186,17 @@ function LogViewer({ unit }: { unit: string }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        <Select value={lines} onChange={(event) => setLines(event.target.value)}>
-          <option value="100">100 lines</option>
-          <option value="200">200 lines</option>
-          <option value="500">500 lines</option>
-          <option value="1000">1000 lines</option>
-        </Select>
+        <Dropdown
+          value={lines}
+          onChange={setLines}
+          options={[
+            { value: '100', label: '100 lines' },
+            { value: '200', label: '200 lines' },
+            { value: '500', label: '500 lines' },
+            { value: '1000', label: '1000 lines' },
+          ]}
+          ariaLabel="Log line count"
+        />
         <Input placeholder="Filter logs" value={filter} onChange={(event) => setFilter(event.target.value)} />
         <Button variant="ghost" onClick={() => void logs.refetch()}>
           <RefreshCw size={16} />
@@ -1043,7 +1210,13 @@ function LogViewer({ unit }: { unit: string }) {
   )
 }
 
-function ServiceControls({ unit, notify }: { unit: string; notify: (message: string, kind?: 'ok' | 'warn' | 'err') => void }) {
+function ServiceControls({
+  unit,
+  notify,
+}: {
+  unit: string
+  notify: (message: string, kind?: 'ok' | 'warn' | 'err') => void
+}) {
   const [output, setOutput] = useState('Action output will appear here.')
   async function action(name: string) {
     if (!unit) return
@@ -1092,13 +1265,14 @@ function LogsPage({ units }: { units: Bootstrap['log_units'] }) {
         <Terminal className="text-accent" size={16} />
         <h2 className="text-base font-black">Live logs</h2>
       </div>
-      <Select className="mb-3" value={unit} onChange={(event) => setUnit(event.target.value)}>
-        {units.map((item) => (
-          <option key={item.unit} value={item.unit}>
-            {item.name} - {item.unit}
-          </option>
-        ))}
-      </Select>
+      <Dropdown
+        className="mb-3 w-full md:w-[32rem]"
+        value={unit}
+        onChange={setUnit}
+        options={units.map((item) => ({ value: item.unit, label: `${item.name} - ${item.unit}` }))}
+        placeholder="No log units"
+        ariaLabel="Log unit"
+      />
       <LogViewer unit={unit} />
     </Card>
   )
@@ -1118,7 +1292,9 @@ function PermissionsPage({ notify }: { notify: (message: string, kind?: 'ok' | '
     },
     onError: (err) => notify(err instanceof Error ? err.message : 'Permission scan failed', 'err'),
   })
-  const visibleEntries = results.map((item, index) => ({ item, index })).filter(({ item }) => !issuesOnly || item.ok === false)
+  const visibleEntries = results
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !issuesOnly || item.ok === false)
   const visible = visibleEntries.map(({ item }) => item)
   async function applySelected() {
     const fixes = [...selected].map((index) => ({ ...results[index], recursive }))
@@ -1145,7 +1321,12 @@ function PermissionsPage({ notify }: { notify: (message: string, kind?: 'ok' | '
           <input type="checkbox" checked={issuesOnly} onChange={(event) => setIssuesOnly(event.target.checked)} />
           Issues only
         </label>
-        <Button variant="ghost" onClick={() => setSelected(new Set(results.map((_, index) => index).filter((index) => results[index].ok === false)))}>
+        <Button
+          variant="ghost"
+          onClick={() =>
+            setSelected(new Set(results.map((_, index) => index).filter((index) => results[index].ok === false)))
+          }
+        >
           Select mismatches
         </Button>
         <Button disabled={!selected.size} onClick={() => void applySelected()}>
@@ -1198,22 +1379,32 @@ function ErrorsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'warn'
   return (
     <Card className="p-3">
       <div className="mb-3 flex flex-wrap gap-2">
-        <Select value={service} onChange={(event) => setService(event.target.value)}>
-          <option value="">All services</option>
-          {services.map((item) => (
-            <option key={item}>{item}</option>
-          ))}
-        </Select>
-        <Select value={severity} onChange={(event) => setSeverity(event.target.value)}>
-          <option value="">All severities</option>
-          <option value="error">Errors</option>
-          <option value="warning">Warnings</option>
-        </Select>
-        <Select value={sort} onChange={(event) => setSort(event.target.value)}>
-          <option value="newest">Newest</option>
-          <option value="oldest">Oldest</option>
-          <option value="count">Count</option>
-        </Select>
+        <Dropdown
+          value={service}
+          onChange={setService}
+          options={[{ value: '', label: 'All services' }, ...services.map((item) => ({ value: item, label: item }))]}
+          ariaLabel="Error service filter"
+        />
+        <Dropdown
+          value={severity}
+          onChange={setSeverity}
+          options={[
+            { value: '', label: 'All severities' },
+            { value: 'error', label: 'Errors' },
+            { value: 'warning', label: 'Warnings' },
+          ]}
+          ariaLabel="Error severity filter"
+        />
+        <Dropdown
+          value={sort}
+          onChange={setSort}
+          options={[
+            { value: 'newest', label: 'Newest' },
+            { value: 'oldest', label: 'Oldest' },
+            { value: 'count', label: 'Count' },
+          ]}
+          ariaLabel="Error sort"
+        />
         <Button onClick={() => void scanNow()}>Scan now</Button>
         <Button variant="danger" onClick={() => void clear()}>
           Clear
@@ -1243,7 +1434,10 @@ function SettingsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'war
   const settings = useQuery({
     queryKey: ['settings'],
     queryFn: async () => {
-      const [keyData, urlData] = await Promise.all([api<Record<string, AnyRecord>>('/api/settings/keys'), api<Record<string, AnyRecord>>('/api/settings/urls')])
+      const [keyData, urlData] = await Promise.all([
+        api<Record<string, AnyRecord>>('/api/settings/keys'),
+        api<Record<string, AnyRecord>>('/api/settings/urls'),
+      ])
       setKeys(Object.fromEntries(Object.entries(keyData).map(([key, value]) => [key, text(value.value)])))
       setUrls(Object.fromEntries(Object.entries(urlData).map(([key, value]) => [key, text(value.value)])))
       return { keyData, urlData }
@@ -1262,21 +1456,52 @@ function SettingsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'war
       notify('Password confirmation does not match', 'warn')
       return
     }
-    await api('/api/settings/password', { method: 'POST', body: JSON.stringify({ current: passwords.current, new_password: passwords.next }) })
+    await api('/api/settings/password', {
+      method: 'POST',
+      body: JSON.stringify({ current: passwords.current, new_password: passwords.next }),
+    })
     notify('Password changed')
     setPasswords({ current: '', next: '', confirm: '' })
   }
   if (settings.isLoading) return <Card className="p-3 text-xs text-muted">Loading settings...</Card>
   return (
     <div className="grid gap-3 xl:grid-cols-2">
-      <EditableRegistry title="API keys" data={settings.data?.keyData || {}} values={keys} setValues={setKeys} onSave={() => void saveKeys()} secret />
-      <EditableRegistry title="Service URLs" data={settings.data?.urlData || {}} values={urls} setValues={setUrls} onSave={() => void saveUrls()} />
+      <EditableRegistry
+        title="API keys"
+        data={settings.data?.keyData || {}}
+        values={keys}
+        setValues={setKeys}
+        onSave={() => void saveKeys()}
+        secret
+      />
+      <EditableRegistry
+        title="Service URLs"
+        data={settings.data?.urlData || {}}
+        values={urls}
+        setValues={setUrls}
+        onSave={() => void saveUrls()}
+      />
       <Card className="p-3 xl:col-span-2">
         <h2 className="mb-3 text-base font-black">Password</h2>
         <div className="grid gap-2 md:grid-cols-3">
-          <Input type="password" placeholder="Current" value={passwords.current} onChange={(event) => setPasswords({ ...passwords, current: event.target.value })} />
-          <Input type="password" placeholder="New" value={passwords.next} onChange={(event) => setPasswords({ ...passwords, next: event.target.value })} />
-          <Input type="password" placeholder="Confirm" value={passwords.confirm} onChange={(event) => setPasswords({ ...passwords, confirm: event.target.value })} />
+          <Input
+            type="password"
+            placeholder="Current"
+            value={passwords.current}
+            onChange={(event) => setPasswords({ ...passwords, current: event.target.value })}
+          />
+          <Input
+            type="password"
+            placeholder="New"
+            value={passwords.next}
+            onChange={(event) => setPasswords({ ...passwords, next: event.target.value })}
+          />
+          <Input
+            type="password"
+            placeholder="Confirm"
+            value={passwords.confirm}
+            onChange={(event) => setPasswords({ ...passwords, confirm: event.target.value })}
+          />
         </div>
         <Button className="mt-3" onClick={() => void changePassword()}>
           Update password
@@ -1320,7 +1545,11 @@ function EditableRegistry({
               {(entries || []).map(([key, value]) => (
                 <label key={key} className="grid gap-1 text-xs text-muted">
                   {text(value.label, key)}
-                  <Input type={secret ? 'password' : 'text'} value={values[key] || ''} onChange={(event) => setValues({ ...values, [key]: event.target.value })} />
+                  <Input
+                    type={secret ? 'password' : 'text'}
+                    value={values[key] || ''}
+                    onChange={(event) => setValues({ ...values, [key]: event.target.value })}
+                  />
                 </label>
               ))}
             </div>
@@ -1332,7 +1561,11 @@ function EditableRegistry({
 }
 
 function JellyfinPage() {
-  const jellyfin = useQuery({ queryKey: ['jellyfin'], queryFn: () => api<AnyRecord>('/api/jellyfin'), refetchInterval: 30000 })
+  const jellyfin = useQuery({
+    queryKey: ['jellyfin'],
+    queryFn: () => api<AnyRecord>('/api/jellyfin'),
+    refetchInterval: 30000,
+  })
   return (
     <div className="grid gap-3 lg:grid-cols-2">
       <JsonPanel title="Active sessions" data={jellyfin.data?.sessions || []} />
@@ -1371,13 +1604,12 @@ function SpeedTestCard({ config, compact }: { config: SpeedConfig; compact?: boo
           <p className="text-xs text-muted">Direct and proxied download checks</p>
         </div>
         <div className="flex gap-2">
-          <Select value={size} onChange={(event) => setSize(event.target.value)}>
-            {['10', '25', '50', '100', '250', '500'].map((value) => (
-              <option key={value} value={value}>
-                {value} MB
-              </option>
-            ))}
-          </Select>
+          <Dropdown
+            value={size}
+            onChange={setSize}
+            options={['10', '25', '50', '100', '250', '500'].map((value) => ({ value, label: `${value} MB` }))}
+            ariaLabel="Speed test size"
+          />
           <Button onClick={() => void run()} disabled={running}>
             {running ? 'Running...' : 'Run'}
           </Button>
@@ -1407,7 +1639,9 @@ function BenchmarkPage({ titles }: { titles: Record<string, string> }) {
   const [mode, setMode] = useState('all')
   const [results, setResults] = useState<unknown[]>([])
   async function runOne() {
-    const data = await api<AnyRecord>(`/api/benchmark?imdb=${encodeURIComponent(imdb)}&mode=${encodeURIComponent(mode)}`)
+    const data = await api<AnyRecord>(
+      `/api/benchmark?imdb=${encodeURIComponent(imdb)}&mode=${encodeURIComponent(mode)}`,
+    )
     setResults([data])
   }
   async function runAll() {
@@ -1420,18 +1654,24 @@ function BenchmarkPage({ titles }: { titles: Record<string, string> }) {
   return (
     <Card className="p-3">
       <div className="mb-3 flex flex-wrap gap-2">
-        <Select value={imdb} onChange={(event) => setImdb(event.target.value)}>
-          {Object.entries(titles).map(([id, title]) => (
-            <option key={id} value={id}>
-              {title}
-            </option>
-          ))}
-        </Select>
-        <Select value={mode} onChange={(event) => setMode(event.target.value)}>
-          <option value="all">All</option>
-          <option value="cached">Cached</option>
-          <option value="uncached">Uncached</option>
-        </Select>
+        <Dropdown
+          className="w-full sm:w-80"
+          value={imdb}
+          onChange={setImdb}
+          options={Object.entries(titles).map(([id, title]) => ({ value: id, label: title }))}
+          placeholder="Select a title"
+          ariaLabel="Benchmark title"
+        />
+        <Dropdown
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'cached', label: 'Cached' },
+            { value: 'uncached', label: 'Uncached' },
+          ]}
+          ariaLabel="Benchmark mode"
+        />
         <Button onClick={() => void runOne()}>Run benchmark</Button>
         <Button variant="ghost" onClick={() => void runAll()}>
           Run all
@@ -1469,7 +1709,11 @@ function ApiExplorer() {
         <h2 className="mb-3 text-base font-black">REST API Explorer</h2>
         <div className="space-y-2">
           {endpoints.map(([method, path]) => (
-            <button key={`${method}-${path}`} className="flex w-full items-center gap-2 rounded-md border border-line bg-canvas p-2.5 text-left hover:border-accent/40" onClick={() => void tryEndpoint(method, path)}>
+            <button
+              key={`${method}-${path}`}
+              className="flex w-full items-center gap-2 rounded-md border border-line bg-canvas p-2.5 text-left hover:border-accent/40"
+              onClick={() => void tryEndpoint(method, path)}
+            >
               <Badge tone={method === 'GET' ? 'cyan' : 'warn'}>{method}</Badge>
               <span className="font-mono text-xs text-text">{path}</span>
             </button>
@@ -1486,8 +1730,12 @@ function PackagesPage() {
   const packages = useQuery({ queryKey: ['packages'], queryFn: () => api<AnyRecord>('/api/packages') })
   const nativeData = asRecord(packages.data?.native)
   const aurData = asRecord(packages.data?.aur)
-  const nativeUpdates = asArray(nativeData.updates).map(asRecord).map((row) => ({ ...row, repo: 'native', outdated: true }))
-  const aurUpdates = asArray(aurData.updates).map(asRecord).map((row) => ({ ...row, repo: 'aur', outdated: true }))
+  const nativeUpdates = asArray(nativeData.updates)
+    .map(asRecord)
+    .map((row) => ({ ...row, repo: 'native', outdated: true }))
+  const aurUpdates = asArray(aurData.updates)
+    .map(asRecord)
+    .map((row) => ({ ...row, repo: 'aur', outdated: true }))
   const summary = [
     { repo: 'native', total: nativeData.total, outdated: nativeData.outdated },
     { repo: 'aur', total: aurData.total, outdated: aurData.outdated },
@@ -1502,7 +1750,14 @@ function PackagesPage() {
           Show all native packages
         </label>
       </div>
-      <DataTable rows={rows} columns={showAll ? ['repo', 'total', 'outdated', 'name', 'installed', 'available'] : ['name', 'installed', 'available', 'repo', 'outdated']} />
+      <DataTable
+        rows={rows}
+        columns={
+          showAll
+            ? ['repo', 'total', 'outdated', 'name', 'installed', 'available']
+            : ['name', 'installed', 'available', 'repo', 'outdated']
+        }
+      />
     </Card>
   )
 }
@@ -1520,13 +1775,15 @@ function Analyzer({ endpoint, logUnit, title }: { endpoint: string; logUnit?: st
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        <Select value={lines} onChange={(event) => setLines(event.target.value)}>
-          {['1000', '2000', '5000', '10000', '25000', '50000'].map((value) => (
-            <option key={value} value={value}>
-              {value} lines
-            </option>
-          ))}
-        </Select>
+        <Dropdown
+          value={lines}
+          onChange={setLines}
+          options={['1000', '2000', '5000', '10000', '25000', '50000'].map((value) => ({
+            value,
+            label: `${value} lines`,
+          }))}
+          ariaLabel="Analyzer line count"
+        />
         <Button onClick={() => void load()}>Analyze</Button>
         {logUnit && (
           <Button variant="ghost" onClick={() => void raw()}>
@@ -1550,11 +1807,20 @@ function AioTestSuite() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        <Select value={type} onChange={(event) => setType(event.target.value)}>
-          <option value="movie">Movie</option>
-          <option value="series">Series</option>
-        </Select>
-        <Input value={imdb} onChange={(event) => setImdb(event.target.value)} placeholder="tt0468569 or tt0903747:3:7" />
+        <Dropdown
+          value={type}
+          onChange={setType}
+          options={[
+            { value: 'movie', label: 'Movie' },
+            { value: 'series', label: 'Series' },
+          ]}
+          ariaLabel="AIOStreams test type"
+        />
+        <Input
+          value={imdb}
+          onChange={(event) => setImdb(event.target.value)}
+          placeholder="tt0468569 or tt0903747:3:7"
+        />
         <Button onClick={() => void run()}>Run test</Button>
       </div>
       <JsonPanel title="Test results" data={results} />
@@ -1563,17 +1829,37 @@ function AioTestSuite() {
 }
 
 function ProcessModal({ onClose }: { onClose: () => void }) {
-  const processes = useQuery({ queryKey: ['processes'], queryFn: () => api<{ processes: AnyRecord[]; top_memory: AnyRecord[] }>('/api/processes') })
+  const processes = useQuery({
+    queryKey: ['processes'],
+    queryFn: () => api<{ processes: AnyRecord[]; top_memory: AnyRecord[] }>('/api/processes'),
+  })
   return (
     <Modal title="Process Monitor" onClose={onClose} wide>
       <div className="space-y-4">
         <Card className="p-3">
           <h3 className="mb-2 text-xs font-black uppercase text-muted">Top CPU processes</h3>
-          <DataTable rows={processes.data?.processes || []} columns={['name', 'pid', 'cpu_pct', 'cpu_total_pct', 'mem_mb', 'mem_pct', 'threads', 'user', 'status', 'cmd']} />
+          <DataTable
+            rows={processes.data?.processes || []}
+            columns={[
+              'name',
+              'pid',
+              'cpu_pct',
+              'cpu_total_pct',
+              'mem_mb',
+              'mem_pct',
+              'threads',
+              'user',
+              'status',
+              'cmd',
+            ]}
+          />
         </Card>
         <Card className="p-3">
           <h3 className="mb-2 text-xs font-black uppercase text-muted">Top RAM processes</h3>
-          <DataTable rows={processes.data?.top_memory || []} columns={['name', 'pid', 'mem_mb', 'mem_pct', 'cpu_pct', 'cpu_total_pct', 'user', 'status', 'cmd']} />
+          <DataTable
+            rows={processes.data?.top_memory || []}
+            columns={['name', 'pid', 'mem_mb', 'mem_pct', 'cpu_pct', 'cpu_total_pct', 'user', 'status', 'cmd']}
+          />
         </Card>
       </div>
     </Modal>
@@ -1589,7 +1875,8 @@ function DataTable({
   columns: string[]
   selectable?: { selected: Set<number>; onToggle: (index: number) => void }
 }) {
-  if (!rows.length) return <div className="rounded-lg border border-line bg-canvas p-3 text-xs text-muted">No data.</div>
+  if (!rows.length)
+    return <div className="rounded-lg border border-line bg-canvas p-3 text-xs text-muted">No data.</div>
   return (
     <div className="overflow-auto rounded-lg border border-line">
       <table className="min-w-full border-collapse text-xs">
@@ -1608,7 +1895,11 @@ function DataTable({
             <tr key={index} className="border-t border-line bg-canvas/60">
               {selectable && (
                 <td className="p-1.5">
-                  <input type="checkbox" checked={selectable.selected.has(index)} onChange={() => selectable.onToggle(index)} />
+                  <input
+                    type="checkbox"
+                    checked={selectable.selected.has(index)}
+                    onChange={() => selectable.onToggle(index)}
+                  />
                 </td>
               )}
               {columns.map((column) => (
