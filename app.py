@@ -13,6 +13,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -21,7 +22,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -48,6 +49,25 @@ logger = logging.getLogger(__name__)
 _BASE_DIR = Path(__file__).parent
 _SPA_INDEX = _BASE_DIR / "static" / "app" / "index.html"
 _background_tasks: set[asyncio.Task] = set()
+
+
+def _configured_public_origin() -> str:
+    origin = os.environ.get("MONITOR_PUBLIC_ORIGIN", "https://monitor.obby.ca").strip().rstrip("/")
+    if not origin:
+        return "https://monitor.obby.ca"
+    if "://" not in origin:
+        return f"https://{origin}"
+    return origin
+
+
+PUBLIC_ORIGIN = _configured_public_origin()
+
+
+def _public_url(path: str = "") -> str:
+    if not path:
+        return PUBLIC_ORIGIN
+    suffix = path if path.startswith("/") else f"/{path}"
+    return f"{PUBLIC_ORIGIN}{suffix}"
 
 
 def _static_version() -> str:
@@ -130,7 +150,7 @@ def check_pw(username: str, password: str) -> bool:
         return False
     try:
         return ph.verify(ADMIN_HASH[0], password)
-    except (VerifyMismatchError, Exception):
+    except VerifyMismatchError, Exception:
         return False
 
 
@@ -208,7 +228,9 @@ class CacheHeadersMiddleware:
         async def send_with_cache_headers(message):
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
-                if path.startswith("/api/") or path in {"/", "/login", "/logout", "/speedtest"}:
+                if path in {"/robots.txt", "/sitemap.xml"}:
+                    headers["Cache-Control"] = "public, max-age=3600"
+                elif path.startswith("/api/") or path in {"/", "/login", "/logout", "/speedtest"}:
                     headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
                     headers["Pragma"] = "no-cache"
                     headers["Expires"] = "0"
@@ -220,6 +242,47 @@ class CacheHeadersMiddleware:
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+
+async def robots_txt(request: Request):
+    return PlainTextResponse(
+        "\n".join(
+            [
+                "User-agent: *",
+                "Allow: /",
+                "Disallow: /api/",
+                "Disallow: /logout",
+                "Disallow: /speedtest/download",
+                f"Sitemap: {_public_url('/sitemap.xml')}",
+                "",
+            ]
+        )
+    )
+
+
+async def sitemap_xml(request: Request):
+    lastmod = datetime.now(UTC).date().isoformat()
+    urls = [
+        ("/", "1.0"),
+    ]
+    entries = "\n".join(
+        (
+            "  <url>\n"
+            f"    <loc>{xml_escape(_public_url(path))}</loc>\n"
+            f"    <lastmod>{lastmod}</lastmod>\n"
+            "    <changefreq>daily</changefreq>\n"
+            f"    <priority>{priority}</priority>\n"
+            "  </url>"
+        )
+        for path, priority in urls
+    )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{entries}\n"
+        "</urlset>\n"
+    )
+    return Response(body, media_type="application/xml")
 
 
 async def login(request: Request):
@@ -242,7 +305,6 @@ async def logout(request: Request):
     return RedirectResponse("/login", status_code=303)
 
 
-@require_auth
 async def dashboard(request: Request):
     return _spa_response()
 
@@ -364,7 +426,7 @@ async def api_logs(request: Request):
         return JSONResponse({"error": "not allowed"}, status_code=403)
     try:
         n = str(min(int(request.query_params.get("n", "200")), 1000))
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         n = "200"
     try:
         result = await run_command(
@@ -565,6 +627,8 @@ async def api_service_action(request: Request):
 app = Starlette(
     lifespan=lifespan,
     routes=[
+        Route("/robots.txt", robots_txt),
+        Route("/sitemap.xml", sitemap_xml),
         Route("/login", login, methods=["GET", "POST"]),
         Route("/logout", logout),
         Route("/", dashboard),

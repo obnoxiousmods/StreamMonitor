@@ -1,0 +1,29 @@
+{
+  "name": "StreamMonitor",
+  "short_name": "Monitor",
+  "description": "Real-time infrastructure monitoring for self-hosted streaming, media, and automation stacks.",
+  "start_url": "/login",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111116",
+  "theme_color": "#c7b7ff",
+  "icons": [
+    {
+      "src": "/static/app/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/app/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/app/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

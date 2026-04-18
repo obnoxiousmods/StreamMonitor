@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="StreamMonitor">
+  <rect width="128" height="128" rx="28" fill="#111116"/>
+  <path d="M28 78c10 12 22 18 36 18s26-6 36-18" fill="none" stroke="#c7b7ff" stroke-width="10" stroke-linecap="round"/>
+  <path d="M34 62c8 8 18 12 30 12s22-4 30-12" fill="none" stroke="#9ee6c8" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="64" cy="45" r="12" fill="#ffd7a8"/>
+  <circle cx="64" cy="45" r="5" fill="#111116"/>
+</svg>
