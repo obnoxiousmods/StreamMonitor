@@ -76,6 +76,52 @@ const TAB_ITEMS = [
   ['packages', 'Packages', Database],
 ] as const
 
+const ACCENT_THEME_STORAGE_KEY = 'streammonitor.accentTheme'
+
+const ACCENT_THEMES = [
+  { id: 'purple', label: 'Pastel Purple' },
+  { id: 'lilac', label: 'Lilac' },
+  { id: 'rose', label: 'Rose' },
+  { id: 'peach', label: 'Peach' },
+  { id: 'mint', label: 'Mint' },
+  { id: 'aqua', label: 'Aqua' },
+  { id: 'sky', label: 'Sky' },
+  { id: 'lemon', label: 'Lemon' },
+  { id: 'coral', label: 'Coral' },
+  { id: 'periwinkle', label: 'Periwinkle' },
+] as const
+
+type AccentThemeId = (typeof ACCENT_THEMES)[number]['id']
+
+function isAccentThemeId(value: string | null): value is AccentThemeId {
+  return ACCENT_THEMES.some((theme) => theme.id === value)
+}
+
+function readAccentTheme(): AccentThemeId {
+  if (typeof window === 'undefined') return 'purple'
+  try {
+    const stored = window.localStorage.getItem(ACCENT_THEME_STORAGE_KEY)
+    return isAccentThemeId(stored) ? stored : 'purple'
+  } catch {
+    return 'purple'
+  }
+}
+
+function applyAccentTheme(theme: AccentThemeId) {
+  if (typeof document === 'undefined') return
+  document.documentElement.dataset.accentTheme = theme
+}
+
+function saveAccentTheme(theme: AccentThemeId) {
+  try {
+    window.localStorage.setItem(ACCENT_THEME_STORAGE_KEY, theme)
+  } catch {
+    // localStorage can be disabled in hardened browser profiles; theme still applies for this session.
+  }
+}
+
+applyAccentTheme(readAccentTheme())
+
 function asRecord(value: unknown): AnyRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as AnyRecord) : {}
 }
@@ -132,9 +178,9 @@ function Button({
   return (
     <button
       className={cx(
-        'inline-flex min-h-9 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
-        variant === 'default' && 'border-mint/40 bg-mint/15 text-text hover:bg-mint/25',
-        variant === 'ghost' && 'border-line bg-panel2 text-muted hover:border-mint/35 hover:text-text',
+        'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50',
+        variant === 'default' && 'border-accent/45 bg-accent/15 text-text hover:bg-accent/25',
+        variant === 'ghost' && 'border-line bg-panel2 text-muted hover:border-accent/35 hover:text-text',
         variant === 'danger' && 'border-rose/40 bg-rose/15 text-rose hover:bg-rose/25',
         className,
       )}
@@ -166,7 +212,7 @@ function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       className={cx(
-        'min-h-9 rounded-md border border-line bg-canvas px-3 py-2 text-sm text-text outline-none transition placeholder:text-dim focus:border-mint/60',
+        'min-h-8 rounded-md border border-line bg-canvas px-2.5 py-1.5 text-xs text-text outline-none transition placeholder:text-dim focus:border-accent/60',
         className,
       )}
       {...props}
@@ -178,7 +224,7 @@ function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>
   return (
     <select
       className={cx(
-        'min-h-9 rounded-md border border-line bg-canvas px-3 py-2 text-sm text-text outline-none transition focus:border-mint/60',
+        'min-h-8 rounded-md border border-line bg-canvas px-2.5 py-1.5 text-xs text-text outline-none transition focus:border-accent/60',
         className,
       )}
       {...props}
@@ -188,7 +234,7 @@ function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>
 
 function Progress({ value, tone = 'ok' }: { value: number; tone?: 'ok' | 'warn' | 'err' | 'cyan' }) {
   return (
-    <div className="h-1.5 overflow-hidden rounded bg-panel3">
+    <div className="h-1 overflow-hidden rounded bg-panel3">
       <div
         className={cx(
           'h-full rounded',
@@ -205,7 +251,7 @@ function Progress({ value, tone = 'ok' }: { value: number; tone?: 'ok' | 'warn' 
 
 function Field({ label, value, tone }: { label: string; value: ReactNode; tone?: 'ok' | 'warn' | 'err' | 'muted' | 'cyan' }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-line/60 py-1.5 text-sm last:border-b-0">
+    <div className="flex items-center justify-between gap-2 border-b border-line/60 py-1 text-xs last:border-b-0">
       <span className="text-muted">{label}</span>
       <span
         className={cx(
@@ -235,18 +281,18 @@ function Modal({
   wide?: boolean
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3" onMouseDown={onClose}>
       <div
-        className={cx('flex max-h-[92vh] w-full flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-glow', wide ? 'max-w-6xl' : 'max-w-3xl')}
+        className={cx('flex max-h-[94vh] w-full flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-glow', wide ? 'max-w-6xl' : 'max-w-3xl')}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-line bg-panel2 px-4 py-3">
-          <h2 className="text-base font-bold text-text">{title}</h2>
+        <div className="flex items-center justify-between border-b border-line bg-panel2 px-3 py-2">
+          <h2 className="text-sm font-bold text-text">{title}</h2>
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
+        <div className="min-h-0 flex-1 overflow-auto p-3">{children}</div>
       </div>
     </div>
   )
@@ -255,6 +301,7 @@ function Modal({
 function App() {
   const queryClient = useQueryClient()
   const [toast, setToast] = useState<ToastState>(null)
+  const [accentTheme, setAccentTheme] = useState<AccentThemeId>(() => readAccentTheme())
   const session = useQuery({
     queryKey: ['session'],
     queryFn: () => api<{ authenticated: boolean }>('/api/auth/session'),
@@ -264,6 +311,12 @@ function App() {
   function notify(message: string, kind: 'ok' | 'warn' | 'err' = 'ok') {
     setToast({ message, kind })
     window.setTimeout(() => setToast(null), 4200)
+  }
+
+  function changeAccentTheme(theme: AccentThemeId) {
+    applyAccentTheme(theme)
+    saveAccentTheme(theme)
+    setAccentTheme(theme)
   }
 
   if (session.isLoading) {
@@ -288,7 +341,7 @@ function App() {
 
   return (
     <>
-      <DashboardApp notify={notify} />
+      <DashboardApp accentTheme={accentTheme} onAccentThemeChange={changeAccentTheme} notify={notify} />
       {toast && <Toast toast={toast} />}
     </>
   )
@@ -297,7 +350,7 @@ function App() {
 function ShellLoader() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas text-text">
-      <div className="rounded-lg border border-line bg-panel p-6 text-sm text-muted">Loading StreamMonitor...</div>
+      <div className="rounded-lg border border-line bg-panel p-4 text-xs text-muted">Loading StreamMonitor...</div>
     </div>
   )
 }
@@ -306,14 +359,42 @@ function Toast({ toast }: { toast: NonNullable<ToastState> }) {
   return (
     <div
       className={cx(
-        'fixed bottom-4 right-4 z-[60] max-w-md rounded-lg border px-4 py-3 text-sm shadow-glow',
-        toast.kind === 'ok' && 'border-mint/40 bg-mint/15 text-text',
+        'fixed bottom-4 right-4 z-[60] max-w-md rounded-lg border px-3 py-2 text-xs shadow-glow',
+        toast.kind === 'ok' && 'border-accent/40 bg-accent/15 text-text',
         toast.kind === 'warn' && 'border-amber/40 bg-amber/15 text-text',
         toast.kind === 'err' && 'border-rose/40 bg-rose/15 text-text',
       )}
     >
       {toast.message}
     </div>
+  )
+}
+
+function ThemePicker({
+  value,
+  onChange,
+}: {
+  value: AccentThemeId
+  onChange: (theme: AccentThemeId) => void
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs font-semibold uppercase text-dim">
+      Theme
+      <Select
+        className="min-h-8 w-36 px-2 py-1 text-xs"
+        value={value}
+        onChange={(event) => {
+          const next = event.target.value
+          if (isAccentThemeId(next)) onChange(next)
+        }}
+      >
+        {ACCENT_THEMES.map((theme) => (
+          <option key={theme.id} value={theme.id}>
+            {theme.label}
+          </option>
+        ))}
+      </Select>
+    </label>
   )
 }
 
@@ -342,15 +423,15 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
 
   return (
     <main className="min-h-screen bg-canvas text-text">
-      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-6 px-4 py-6 lg:grid-cols-[420px_1fr] lg:px-8">
-        <Card className="self-center p-6">
-          <div className="mb-8 flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-mint/15 text-mint">
+      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-3 px-3 py-4 lg:grid-cols-[390px_1fr] lg:px-6">
+        <Card className="self-center p-5">
+          <div className="mb-6 flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent/15 text-accent">
               <Activity />
             </div>
             <div>
-              <h1 className="text-2xl font-black">StreamMonitor</h1>
-              <p className="text-sm text-muted">Infrastructure and streaming stack</p>
+              <h1 className="text-xl font-black">StreamMonitor</h1>
+              <p className="text-xs text-muted">Infrastructure and streaming stack</p>
             </div>
           </div>
           <form
@@ -361,11 +442,11 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
               login.mutate()
             }}
           >
-            <label className="block text-sm font-semibold text-muted">
+            <label className="block text-xs font-semibold text-muted">
               Username
               <Input className="mt-2 w-full" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
             </label>
-            <label className="block text-sm font-semibold text-muted">
+            <label className="block text-xs font-semibold text-muted">
               Password
               <Input
                 className="mt-2 w-full"
@@ -376,25 +457,25 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
                 autoFocus
               />
             </label>
-            {error && <div className="rounded-md border border-rose/40 bg-rose/10 px-3 py-2 text-sm text-rose">{error}</div>}
+            {error && <div className="rounded-md border border-rose/40 bg-rose/10 px-3 py-2 text-xs text-rose">{error}</div>}
             <Button className="w-full" disabled={login.isPending}>
               <KeyRound size={16} />
               {login.isPending ? 'Signing in...' : 'Sign in'}
             </Button>
           </form>
         </Card>
-        <div className="grid content-center gap-6">
-          <Card className="p-5">
-            <div className="mb-4 flex items-center justify-between">
+        <div className="grid content-center gap-3">
+          <Card className="p-3">
+            <div className="mb-3 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold">Public health</h2>
-                <p className="text-sm text-muted">Unauthenticated service summary</p>
+                <h2 className="text-base font-bold">Public health</h2>
+                <p className="text-xs text-muted">Unauthenticated service summary</p>
               </div>
               <Badge tone={num(publicStatus.data?.down) > 0 ? 'warn' : 'ok'}>
                 {num(publicStatus.data?.up)}/{num(publicStatus.data?.total)} up
               </Badge>
             </div>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
               <Metric label="Services" value={num(publicStatus.data?.total)} />
               <Metric label="Online" value={num(publicStatus.data?.up)} tone="ok" />
               <Metric label="Issues" value={num(publicStatus.data?.down)} tone={num(publicStatus.data?.down) ? 'warn' : 'ok'} />
@@ -408,7 +489,15 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   )
 }
 
-function DashboardApp({ notify }: { notify: (message: string, kind?: 'ok' | 'warn' | 'err') => void }) {
+function DashboardApp({
+  accentTheme,
+  onAccentThemeChange,
+  notify,
+}: {
+  accentTheme: AccentThemeId
+  onAccentThemeChange: (theme: AccentThemeId) => void
+  notify: (message: string, kind?: 'ok' | 'warn' | 'err') => void
+}) {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState(window.location.pathname === '/speedtest' ? 'speed' : 'services')
   const [selectedService, setSelectedService] = useState<string | null>(null)
@@ -471,33 +560,34 @@ function DashboardApp({ notify }: { notify: (message: string, kind?: 'ok' | 'war
   return (
     <main className="min-h-screen bg-canvas text-text">
       <header className="sticky top-0 z-40 border-b border-line bg-canvas/95 backdrop-blur">
-        <div className="mx-auto flex max-w-[1800px] items-center gap-4 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-mint/15 text-mint">
-              <Activity size={20} />
+        <div className="mx-auto flex max-w-[1840px] items-center gap-3 px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
+              <Activity size={17} />
             </div>
             <div className="min-w-0">
-              <div className="font-black">StreamMonitor</div>
+              <div className="text-sm font-black">StreamMonitor</div>
               <div className="text-xs text-muted">Infrastructure dashboard</div>
             </div>
           </div>
-          <div className="ml-auto hidden items-center gap-3 md:flex">
+          <div className="ml-auto hidden items-center gap-2 md:flex">
             <Metric label="Services" value={`${up}/${total}`} tone={down ? 'warn' : 'ok'} compact />
             <Metric label="Issues" value={down} tone={down ? 'err' : 'ok'} compact />
             <Metric label="Updated" value={new Date().toLocaleTimeString()} compact />
           </div>
+          <ThemePicker value={accentTheme} onChange={onAccentThemeChange} />
           <Button variant="ghost" onClick={() => void logout()}>
             <LogOut size={16} />
             Sign out
           </Button>
         </div>
-        <nav className="mx-auto flex max-w-[1800px] gap-2 overflow-x-auto px-4 pb-3">
+        <nav className="mx-auto flex max-w-[1840px] gap-1.5 overflow-x-auto px-3 pb-2">
           {TAB_ITEMS.map(([id, label, Icon]) => (
             <button
               key={id}
               className={cx(
-                'inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition',
-                activeTab === id ? 'border-mint/50 bg-mint/15 text-text' : 'border-line bg-panel text-muted hover:text-text',
+                'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition',
+                activeTab === id ? 'border-accent/50 bg-accent/15 text-text' : 'border-line bg-panel text-muted hover:border-accent/35 hover:text-text',
               )}
               onClick={() => switchTab(id)}
             >
@@ -507,7 +597,7 @@ function DashboardApp({ notify }: { notify: (message: string, kind?: 'ok' | 'war
           ))}
         </nav>
       </header>
-      <div className="mx-auto max-w-[1800px] px-4 py-5">
+      <div className="mx-auto max-w-[1840px] px-3 py-3">
         {activeTab === 'services' && (
           <ServicesPage
             bootstrap={bootstrap.data}
@@ -557,11 +647,11 @@ function Metric({
   compact?: boolean
 }) {
   return (
-    <div className={cx('rounded-md border border-line bg-panel2 px-3 py-2', compact ? 'min-w-24' : '')}>
-      <div className={cx('font-black', tone === 'ok' && 'text-mint', tone === 'warn' && 'text-amber', tone === 'err' && 'text-rose', tone === 'cyan' && 'text-cyan')}>
+    <div className={cx('rounded-md border border-line bg-panel2 px-2.5 py-1.5', compact ? 'min-w-20' : '')}>
+      <div className={cx('text-sm font-black', tone === 'ok' && 'text-mint', tone === 'warn' && 'text-amber', tone === 'err' && 'text-rose', tone === 'cyan' && 'text-cyan')}>
         {value}
       </div>
-      <div className="text-xs font-semibold uppercase text-dim">{label}</div>
+      <div className="text-[11px] font-semibold uppercase text-dim">{label}</div>
     </div>
   )
 }
@@ -593,18 +683,18 @@ function ServicesPage({
   }, [bootstrap.services, status])
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <SystemPanel stats={stats.system || {}} onOpenProcesses={onOpenProcesses} />
       {Object.entries(bootstrap.categories).map(([categoryId, label]) => {
         const ids = grouped[categoryId] || []
         if (!ids.length || categoryId === 'system') return null
         return (
           <section key={categoryId}>
-            <div className="mb-3 flex items-center gap-3">
-              <h2 className="text-sm font-black uppercase text-muted">{label}</h2>
+            <div className="mb-2 flex items-center gap-2">
+              <h2 className="text-xs font-black uppercase text-muted">{label}</h2>
               <div className="h-px flex-1 bg-line" />
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {ids.map((id) => (
                 <ServiceCard
                   key={id}
@@ -639,11 +729,11 @@ function SystemPanel({ stats, onOpenProcesses }: { stats: AnyRecord; onOpenProce
   const decoderPct = num(engines.dec ?? gpu.query_decoder_util_pct)
   return (
     <section>
-      <div className="mb-3 flex items-center gap-3">
-        <h2 className="text-sm font-black uppercase text-muted">System</h2>
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className="text-xs font-black uppercase text-muted">System</h2>
         <div className="h-px flex-1 bg-line" />
       </div>
-      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2.5 lg:grid-cols-2 xl:grid-cols-4">
         <InfoCard title="CPU" icon={<Cpu size={16} />}>
           <Field label="Model" value={text(cpu.model, 'Unknown')} />
           <Field label="Cores / Threads" value={`${text(cpu.physical_cores, '?')} / ${text(cpu.logical_cores, '?')}`} />
@@ -659,7 +749,7 @@ function SystemPanel({ stats, onOpenProcesses }: { stats: AnyRecord; onOpenProce
           {num(swap.cached_gb) > 0 && <Field label="Swap cached" value={gb(swap.cached_gb)} tone="ok" />}
         </InfoCard>
         <InfoCard title="GPU" icon={<Gauge size={16} />}>
-          <div className="mb-2 text-xs text-muted">{text(gpu.name, 'No GPU detected')}</div>
+          <div className="mb-1.5 text-xs text-muted">{text(gpu.name, 'No GPU detected')}</div>
           <Field label="Usage" value={pct(gpu.usage_pct)} tone={num(gpu.usage_pct) > 80 ? 'err' : num(gpu.usage_pct) > 0 ? 'ok' : 'muted'} />
           <Progress value={num(gpu.usage_pct)} tone="ok" />
           <Field label="Encode / Decode" value={`${encoderPct}% / ${decoderPct}%`} tone={encoderPct || decoderPct ? 'cyan' : 'muted'} />
@@ -677,10 +767,10 @@ function SystemPanel({ stats, onOpenProcesses }: { stats: AnyRecord; onOpenProce
           <Field label="Total up" value={`${text(asRecord(stats.net_io).sent_total_gb, 0)} GB`} />
         </InfoCard>
         <InfoCard title="Storage" icon={<HardDrive size={16} />} className="xl:col-span-2">
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-1.5 sm:grid-cols-2">
             {disks.map((disk) => (
-              <div key={text(disk.mount)} className="rounded-md border border-line bg-canvas p-2">
-                <div className="mb-1 flex justify-between gap-2 text-sm">
+              <div key={text(disk.mount)} className="rounded-md border border-line bg-canvas p-1.5">
+                <div className="mb-1 flex justify-between gap-2 text-xs">
                   <span className="font-semibold">{text(disk.mount)}</span>
                   <span className="text-muted">
                     {text(disk.free)} / {text(disk.total)} {text(disk.unit)}
@@ -734,8 +824,8 @@ function InfoCard({
   className?: string
 }) {
   return (
-    <Card className={cx('p-4', className)}>
-      <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase text-muted">
+    <Card className={cx('p-3', className)}>
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-black uppercase text-muted">
         {icon}
         {title}
       </div>
@@ -752,10 +842,10 @@ function ProcessList({ title, processes, mode, onClick }: { title: string; proce
           const value = mode === 'cpu' ? num(proc.cpu_pct) : num(proc.mem_mb)
           const max = Math.max(...processes.slice(0, 10).map((item) => (mode === 'cpu' ? num(item.cpu_pct) : num(item.mem_mb))), 0.1)
           return (
-            <div key={`${text(proc.pid)}-${text(proc.name)}`} className="mb-2">
+            <div key={`${text(proc.pid)}-${text(proc.name)}`} className="mb-1.5">
               <div className="mb-1 flex items-center gap-2 text-xs">
                 <span className="min-w-0 flex-1 truncate font-bold text-text">{text(proc.name, 'unknown')}</span>
-                <span className="font-mono text-mint">{mode === 'cpu' ? `${value.toFixed(1)}%` : `${value.toFixed(1)}M`}</span>
+                <span className="font-mono text-accent">{mode === 'cpu' ? `${value.toFixed(1)}%` : `${value.toFixed(1)}M`}</span>
                 <span className="font-mono text-dim">{mode === 'cpu' ? `${num(proc.mem_mb).toFixed(0)}M` : `${num(proc.mem_pct).toFixed(1)}%`}</span>
               </div>
               <Progress value={(value / max) * 100} tone={mode === 'cpu' && value > 100 ? 'warn' : 'ok'} />
@@ -788,33 +878,33 @@ function ServiceCard({
   const tone = current.ok === true ? 'ok' : current.ok === false ? 'err' : 'muted'
   const highlights = pickHighlights(stats)
   return (
-    <Card className="group p-4 transition hover:border-mint/40">
-      <div className="mb-3 flex items-start gap-3">
+    <Card className="group p-3 transition hover:border-accent/40">
+      <div className="mb-2 flex items-start gap-2">
         <button className="min-w-0 flex-1 text-left" onClick={onOpen}>
           <div className="flex items-center gap-2">
-            <h3 className="truncate font-black">{current.name}</h3>
+            <h3 className="truncate text-sm font-black">{current.name}</h3>
             <Badge tone={tone}>{current.ok === true ? 'UP' : current.ok === false ? 'DOWN' : 'PENDING'}</Badge>
           </div>
           <p className="mt-1 truncate text-xs text-muted">{current.message || 'No status message'}</p>
         </button>
         {webUrl && (
-          <Button variant="ghost" className="min-h-8 px-2" onClick={() => window.open(webUrl, '_blank', 'noopener')}>
+          <Button variant="ghost" className="min-h-7 px-2 py-1" onClick={() => window.open(webUrl, '_blank', 'noopener')}>
             Open
           </Button>
         )}
       </div>
       <HistoryBar history={status.history} />
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
         <Metric label="Latency" value={current.latency_ms != null ? `${current.latency_ms}ms` : '-'} tone={tone === 'err' ? 'err' : 'cyan'} />
         <Metric label="Version" value={text(version.installed || version.latest, '-')} />
       </div>
-      <div className="mt-3 grid gap-1">
+      <div className="mt-2 grid gap-0.5">
         {highlights.map(([key, value]) => (
           <Field key={key} label={key} value={String(value)} />
         ))}
       </div>
-      {meta.stale === true && <div className="mt-3 text-xs text-amber">Stats stale: {text(meta.error, 'waiting for collector')}</div>}
-      <button className="mt-3 text-xs font-bold text-mint opacity-0 transition group-hover:opacity-100" onClick={onOpen}>
+      {meta.stale === true && <div className="mt-2 text-xs text-amber">Stats stale: {text(meta.error, 'waiting for collector')}</div>}
+      <button className="mt-2 text-xs font-bold text-accent opacity-0 transition group-hover:opacity-100" onClick={onOpen}>
         Details
       </button>
       <span className="sr-only">{id}</span>
@@ -825,7 +915,7 @@ function ServiceCard({
 function HistoryBar({ history }: { history: Array<boolean | number | null> }) {
   const recent = history.slice(-60)
   return (
-    <div className="flex h-4 gap-0.5">
+    <div className="flex h-3 gap-0.5">
       {recent.map((item, index) => {
         const ok = item === true || item === 1
         const bad = item === false || item === 0
@@ -865,7 +955,7 @@ function ServiceModal({
   const unit = current.unit || ''
   return (
     <Modal title={current.name} onClose={onClose} wide>
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-3 flex flex-wrap gap-2">
         {['overview', 'logs', 'controls'].map((item) => (
           <Button key={item} variant={tab === item ? 'default' : 'ghost'} onClick={() => setTab(item)}>
             {item}
@@ -893,8 +983,8 @@ function ServiceModal({
         )}
       </div>
       {tab === 'overview' && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="p-4">
+        <div className="grid gap-3 lg:grid-cols-2">
+          <Card className="p-3">
             <Field label="Status" value={current.ok === true ? 'Healthy' : current.ok === false ? 'Unhealthy' : 'Pending'} />
             <Field label="Systemd" value={current.systemd || '-'} />
             <Field label="Latency" value={current.latency_ms != null ? `${current.latency_ms}ms` : '-'} />
@@ -978,15 +1068,15 @@ function ServiceControls({ unit, notify }: { unit: string; notify: (message: str
           Restart
         </Button>
       </div>
-      <pre className="rounded-lg border border-line bg-canvas p-3 text-sm text-muted">{output}</pre>
+      <pre className="rounded-lg border border-line bg-canvas p-3 text-xs text-muted">{output}</pre>
     </div>
   )
 }
 
 function JsonPanel({ title, data }: { title: string; data: unknown }) {
   return (
-    <Card className="p-4">
-      <h3 className="mb-3 text-sm font-black uppercase text-muted">{title}</h3>
+    <Card className="p-3">
+      <h3 className="mb-2 text-xs font-black uppercase text-muted">{title}</h3>
       <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg bg-canvas p-3 font-mono text-xs text-muted">
         {JSON.stringify(data, null, 2)}
       </pre>
@@ -997,10 +1087,10 @@ function JsonPanel({ title, data }: { title: string; data: unknown }) {
 function LogsPage({ units }: { units: Bootstrap['log_units'] }) {
   const [unit, setUnit] = useState(units[0]?.unit || '')
   return (
-    <Card className="p-4">
-      <div className="mb-4 flex items-center gap-3">
-        <Terminal className="text-mint" size={18} />
-        <h2 className="text-lg font-black">Live logs</h2>
+    <Card className="p-3">
+      <div className="mb-3 flex items-center gap-2">
+        <Terminal className="text-accent" size={16} />
+        <h2 className="text-base font-black">Live logs</h2>
       </div>
       <Select className="mb-3" value={unit} onChange={(event) => setUnit(event.target.value)}>
         {units.map((item) => (
@@ -1041,17 +1131,17 @@ function PermissionsPage({ notify }: { notify: (message: string, kind?: 'ok' | '
     }
   }
   return (
-    <Card className="p-4">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+    <Card className="p-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <Button onClick={() => scan.mutate()} disabled={scan.isPending}>
           <RefreshCw size={16} />
           Scan directories
         </Button>
-        <label className="flex items-center gap-2 text-sm text-muted">
+        <label className="flex items-center gap-2 text-xs text-muted">
           <input type="checkbox" checked={recursive} onChange={(event) => setRecursive(event.target.checked)} />
           Recursive
         </label>
-        <label className="flex items-center gap-2 text-sm text-muted">
+        <label className="flex items-center gap-2 text-xs text-muted">
           <input type="checkbox" checked={issuesOnly} onChange={(event) => setIssuesOnly(event.target.checked)} />
           Issues only
         </label>
@@ -1106,8 +1196,8 @@ function ErrorsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'warn'
     notify('Error history cleared')
   }
   return (
-    <Card className="p-4">
-      <div className="mb-4 flex flex-wrap gap-2">
+    <Card className="p-3">
+      <div className="mb-3 flex flex-wrap gap-2">
         <Select value={service} onChange={(event) => setService(event.target.value)}>
           <option value="">All services</option>
           {services.map((item) => (
@@ -1131,8 +1221,8 @@ function ErrorsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'warn'
       </div>
       <div className="space-y-2">
         {filtered.map((row, index) => (
-          <details key={index} className="rounded-md border border-line bg-canvas p-3">
-            <summary className="cursor-pointer text-sm">
+          <details key={index} className="rounded-md border border-line bg-canvas p-2.5">
+            <summary className="cursor-pointer text-xs">
               <Badge tone={text(row.severity) === 'error' ? 'err' : 'warn'}>{text(row.severity, 'event')}</Badge>
               <span className="ml-2 font-bold">{text(row.sid || row.service, 'unknown')}</span>
               <span className="ml-2 text-muted">{text(row.timestamp || row.ts)}</span>
@@ -1176,14 +1266,14 @@ function SettingsPage({ notify }: { notify: (message: string, kind?: 'ok' | 'war
     notify('Password changed')
     setPasswords({ current: '', next: '', confirm: '' })
   }
-  if (settings.isLoading) return <Card className="p-4 text-muted">Loading settings...</Card>
+  if (settings.isLoading) return <Card className="p-3 text-xs text-muted">Loading settings...</Card>
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid gap-3 xl:grid-cols-2">
       <EditableRegistry title="API keys" data={settings.data?.keyData || {}} values={keys} setValues={setKeys} onSave={() => void saveKeys()} secret />
       <EditableRegistry title="Service URLs" data={settings.data?.urlData || {}} values={urls} setValues={setUrls} onSave={() => void saveUrls()} />
-      <Card className="p-4 xl:col-span-2">
-        <h2 className="mb-4 text-lg font-black">Password</h2>
-        <div className="grid gap-3 md:grid-cols-3">
+      <Card className="p-3 xl:col-span-2">
+        <h2 className="mb-3 text-base font-black">Password</h2>
+        <div className="grid gap-2 md:grid-cols-3">
           <Input type="password" placeholder="Current" value={passwords.current} onChange={(event) => setPasswords({ ...passwords, current: event.target.value })} />
           <Input type="password" placeholder="New" value={passwords.next} onChange={(event) => setPasswords({ ...passwords, next: event.target.value })} />
           <Input type="password" placeholder="Confirm" value={passwords.confirm} onChange={(event) => setPasswords({ ...passwords, confirm: event.target.value })} />
@@ -1217,9 +1307,9 @@ function EditableRegistry({
     return acc
   }, {})
   return (
-    <Card className="p-4">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-black">{title}</h2>
+    <Card className="p-3">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-base font-black">{title}</h2>
         <Button onClick={onSave}>Save</Button>
       </div>
       <div className="space-y-4">
@@ -1228,7 +1318,7 @@ function EditableRegistry({
             <h3 className="mb-2 text-xs font-black uppercase text-muted">{group}</h3>
             <div className="space-y-2">
               {(entries || []).map(([key, value]) => (
-                <label key={key} className="grid gap-1 text-sm text-muted">
+                <label key={key} className="grid gap-1 text-xs text-muted">
                   {text(value.label, key)}
                   <Input type={secret ? 'password' : 'text'} value={values[key] || ''} onChange={(event) => setValues({ ...values, [key]: event.target.value })} />
                 </label>
@@ -1244,7 +1334,7 @@ function EditableRegistry({
 function JellyfinPage() {
   const jellyfin = useQuery({ queryKey: ['jellyfin'], queryFn: () => api<AnyRecord>('/api/jellyfin'), refetchInterval: 30000 })
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-3 lg:grid-cols-2">
       <JsonPanel title="Active sessions" data={jellyfin.data?.sessions || []} />
       <JsonPanel title="Recent activity" data={jellyfin.data?.activity || []} />
     </div>
@@ -1274,11 +1364,11 @@ function SpeedTestCard({ config, compact }: { config: SpeedConfig; compact?: boo
     setRunning(false)
   }
   return (
-    <Card className="p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <Card className="p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-lg font-black">Speed test</h2>
-          <p className="text-sm text-muted">Direct and proxied download checks</p>
+          <h2 className="text-base font-black">Speed test</h2>
+          <p className="text-xs text-muted">Direct and proxied download checks</p>
         </div>
         <div className="flex gap-2">
           <Select value={size} onChange={(event) => setSize(event.target.value)}>
@@ -1293,14 +1383,14 @@ function SpeedTestCard({ config, compact }: { config: SpeedConfig; compact?: boo
           </Button>
         </div>
       </div>
-      <div className={cx('grid gap-3', compact ? 'md:grid-cols-2' : 'lg:grid-cols-2')}>
+      <div className={cx('grid gap-2', compact ? 'md:grid-cols-2' : 'lg:grid-cols-2')}>
         {endpoints.map((endpoint) => {
           const result = results.find((item) => item.name === endpoint.name)
           return (
-            <div key={endpoint.name} className="rounded-lg border border-line bg-canvas p-4">
+            <div key={endpoint.name} className="rounded-lg border border-line bg-canvas p-3">
               <div className="mb-2 flex justify-between gap-2">
                 <span className="font-bold">{endpoint.name}</span>
-                <span className="font-mono text-mint">{result ? `${result.mbps.toFixed(1)} Mbps` : '-'}</span>
+                <span className="font-mono text-accent">{result ? `${result.mbps.toFixed(1)} Mbps` : '-'}</span>
               </div>
               <Progress value={result ? Math.min(result.mbps / 10, 100) : 0} tone="cyan" />
               <div className="mt-2 text-xs text-muted">{result ? `${result.seconds.toFixed(2)}s` : endpoint.url}</div>
@@ -1328,8 +1418,8 @@ function BenchmarkPage({ titles }: { titles: Record<string, string> }) {
     }
   }
   return (
-    <Card className="p-4">
-      <div className="mb-4 flex flex-wrap gap-2">
+    <Card className="p-3">
+      <div className="mb-3 flex flex-wrap gap-2">
         <Select value={imdb} onChange={(event) => setImdb(event.target.value)}>
           {Object.entries(titles).map(([id, title]) => (
             <option key={id} value={id}>
@@ -1374,14 +1464,14 @@ function ApiExplorer() {
     setOutput(await api(path, { method }))
   }
   return (
-    <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
-      <Card className="p-4">
-        <h2 className="mb-4 text-lg font-black">REST API Explorer</h2>
+    <div className="grid gap-3 xl:grid-cols-[390px_1fr]">
+      <Card className="p-3">
+        <h2 className="mb-3 text-base font-black">REST API Explorer</h2>
         <div className="space-y-2">
           {endpoints.map(([method, path]) => (
-            <button key={`${method}-${path}`} className="flex w-full items-center gap-3 rounded-md border border-line bg-canvas p-3 text-left hover:border-mint/40" onClick={() => void tryEndpoint(method, path)}>
+            <button key={`${method}-${path}`} className="flex w-full items-center gap-2 rounded-md border border-line bg-canvas p-2.5 text-left hover:border-accent/40" onClick={() => void tryEndpoint(method, path)}>
               <Badge tone={method === 'GET' ? 'cyan' : 'warn'}>{method}</Badge>
-              <span className="font-mono text-sm text-text">{path}</span>
+              <span className="font-mono text-xs text-text">{path}</span>
             </button>
           ))}
         </div>
@@ -1404,10 +1494,10 @@ function PackagesPage() {
   ]
   const rows = showAll ? [...summary, ...nativeUpdates, ...aurUpdates] : [...nativeUpdates, ...aurUpdates]
   return (
-    <Card className="p-4">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+    <Card className="p-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <Button onClick={() => void packages.refetch()}>Check now</Button>
-        <label className="flex items-center gap-2 text-sm text-muted">
+        <label className="flex items-center gap-2 text-xs text-muted">
           <input type="checkbox" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />
           Show all native packages
         </label>
@@ -1477,12 +1567,12 @@ function ProcessModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Process Monitor" onClose={onClose} wide>
       <div className="space-y-4">
-        <Card className="p-4">
-          <h3 className="mb-3 text-sm font-black uppercase text-muted">Top CPU processes</h3>
+        <Card className="p-3">
+          <h3 className="mb-2 text-xs font-black uppercase text-muted">Top CPU processes</h3>
           <DataTable rows={processes.data?.processes || []} columns={['name', 'pid', 'cpu_pct', 'cpu_total_pct', 'mem_mb', 'mem_pct', 'threads', 'user', 'status', 'cmd']} />
         </Card>
-        <Card className="p-4">
-          <h3 className="mb-3 text-sm font-black uppercase text-muted">Top RAM processes</h3>
+        <Card className="p-3">
+          <h3 className="mb-2 text-xs font-black uppercase text-muted">Top RAM processes</h3>
           <DataTable rows={processes.data?.top_memory || []} columns={['name', 'pid', 'mem_mb', 'mem_pct', 'cpu_pct', 'cpu_total_pct', 'user', 'status', 'cmd']} />
         </Card>
       </div>
@@ -1499,15 +1589,15 @@ function DataTable({
   columns: string[]
   selectable?: { selected: Set<number>; onToggle: (index: number) => void }
 }) {
-  if (!rows.length) return <div className="rounded-lg border border-line bg-canvas p-4 text-sm text-muted">No data.</div>
+  if (!rows.length) return <div className="rounded-lg border border-line bg-canvas p-3 text-xs text-muted">No data.</div>
   return (
     <div className="overflow-auto rounded-lg border border-line">
-      <table className="min-w-full border-collapse text-sm">
+      <table className="min-w-full border-collapse text-xs">
         <thead className="bg-panel2 text-xs uppercase text-muted">
           <tr>
-            {selectable && <th className="p-2 text-left">Select</th>}
+            {selectable && <th className="p-1.5 text-left">Select</th>}
             {columns.map((column) => (
-              <th key={column} className="p-2 text-left">
+              <th key={column} className="p-1.5 text-left">
                 {column.replace(/_/g, ' ')}
               </th>
             ))}
@@ -1517,12 +1607,12 @@ function DataTable({
           {rows.map((row, index) => (
             <tr key={index} className="border-t border-line bg-canvas/60">
               {selectable && (
-                <td className="p-2">
+                <td className="p-1.5">
                   <input type="checkbox" checked={selectable.selected.has(index)} onChange={() => selectable.onToggle(index)} />
                 </td>
               )}
               {columns.map((column) => (
-                <td key={column} className="max-w-sm truncate p-2 text-muted" title={text(row[column])}>
+                <td key={column} className="max-w-[26rem] truncate p-1.5 text-muted" title={text(row[column])}>
                   {typeof row[column] === 'boolean' ? (row[column] ? 'yes' : 'no') : text(row[column], '-')}
                 </td>
               ))}
