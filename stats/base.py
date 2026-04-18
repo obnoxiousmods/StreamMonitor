@@ -7,6 +7,7 @@ import httpx
 # ── Shared state (imported by all collector modules) ──────────────────────────
 service_stats: dict[str, dict] = {}
 stats_updated_at: dict[str, str] = {}
+stats_meta: dict[str, dict] = {}
 github_versions: dict[str, dict] = {}
 
 

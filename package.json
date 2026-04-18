@@ -3,18 +3,49 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "StreamMonitor frontend linting and formatting",
+  "description": "StreamMonitor backend plus Vite React dashboard",
   "scripts": {
-    "lint:js": "eslint static/js/",
-    "lint:css": "stylelint \"static/css/*.css\"",
-    "format": "prettier --write static/js/ static/css/",
-    "lint": "npm run lint:js && npm run lint:css"
+    "dev": "vite --config frontend/vite.config.ts --host 0.0.0.0",
+    "build": "vite build --config frontend/vite.config.ts",
+    "preview": "vite preview --config frontend/vite.config.ts --host 0.0.0.0",
+    "typecheck": "tsc -p frontend/tsconfig.app.json --noEmit && tsc -p frontend/tsconfig.node.json --noEmit",
+    "lint:js": "eslint --config frontend/eslint.config.js frontend/src frontend/vite.config.ts",
+    "lint:css": "stylelint \"frontend/src/**/*.css\"",
+    "format": "prettier --write frontend/src frontend/index.html frontend/vite.config.ts",
+    "lint": "npm run typecheck && npm run lint:js && npm run lint:css"
   },
   "devDependencies": {
-    "eslint": "^10.1.0",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.5.0",
+    "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
-    "prettier": "^3.8.1",
-    "stylelint": "^17.6.0",
-    "stylelint-config-standard": "^40.0.0"
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.5.0",
+    "postcss": "^8.5.10",
+    "prettier": "^3.8.3",
+    "stylelint": "^17.8.0",
+    "stylelint-config-standard": "^40.0.0",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.58.2",
+    "vite": "^8.0.8"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-toast": "^1.2.15",
+    "@tanstack/react-query": "^5.99.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.8.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "tailwind-merge": "^3.5.0"
   }
 }

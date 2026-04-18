@@ -12,11 +12,12 @@ import httpx
 
 import core.config as _cfg
 from core.config import SERVICES
+from core.process import run_command
 
 logger = logging.getLogger(__name__)
 
 HISTORY_LEN = 120
-CHECK_INTERVAL = 30
+CHECK_INTERVAL = 5
 
 hist: dict[str, deque] = {k: deque(maxlen=HISTORY_LEN) for k in SERVICES}
 cur: dict[str, dict] = {}
@@ -24,16 +25,8 @@ cur: dict[str, dict] = {}
 
 async def systemd_active(unit: str) -> tuple[bool, str]:
     try:
-        p = await asyncio.create_subprocess_exec(
-            "systemctl",
-            "is-active",
-            "--quiet",
-            unit,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await p.wait()
-        active = p.returncode == 0
+        result = await run_command(["systemctl", "is-active", "--quiet", unit], timeout=3)
+        active = result.returncode == 0
         return active, "active" if active else "inactive"
     except Exception as e:
         return False, f"error: {e}"

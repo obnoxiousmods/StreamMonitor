@@ -7,6 +7,12 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
+echo "==> Installing frontend dependencies..."
+npm ci
+
+echo "==> Building frontend..."
+npm run build
+
 echo "==> Installing PyInstaller..."
 uv pip install pyinstaller
 

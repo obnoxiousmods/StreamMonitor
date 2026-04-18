@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import UTC, datetime
+from contextlib import suppress
+from datetime import UTC, datetime, timedelta
 
-from stats.base import github_versions, service_stats, stats_updated_at  # re-export
+from stats.base import github_versions, service_stats, stats_meta, stats_updated_at  # re-export
 from stats.collectors import (
     collect_aiostreams,
     collect_bazarr,
@@ -34,7 +35,11 @@ from stats.system import collect_system
 
 logger = logging.getLogger(__name__)
 
-STATS_INTERVAL = 60  # seconds
+STATS_INTERVAL = 15  # seconds
+SYSTEM_STATS_INTERVAL = 5  # seconds
+COLLECTOR_TIMEOUT = 25  # seconds
+HEAVY_STATS_INTERVAL = 60  # seconds
+HEAVY_COLLECTORS = {"jackett", "stremthru", "zilean"}
 
 _background_tasks: set[asyncio.Task] = set()
 
@@ -66,39 +71,96 @@ async def _collect_one(sid: str) -> None:
     fn = _COLLECTORS.get(sid)
     if not fn:
         return
+    started = time.monotonic()
+    started_at = datetime.now(UTC)
+    interval = _collector_interval(sid)
+    stats_meta[sid] = {
+        **stats_meta.get(sid, {}),
+        "started_at": started_at.isoformat(),
+        "running": True,
+        "interval": interval,
+    }
     try:
         logger.debug(f"Running collector for {sid}")
-        data = await fn()
+        data = await asyncio.wait_for(fn(), timeout=COLLECTOR_TIMEOUT)
         service_stats[sid] = data or {}
-        stats_updated_at[sid] = datetime.now(UTC).isoformat()
-    except Exception:
+        updated_at = datetime.now(UTC)
+        stats_updated_at[sid] = updated_at.isoformat()
+        stats_meta[sid] = {
+            "ok": True,
+            "stale": False,
+            "running": False,
+            "updated_at": updated_at.isoformat(),
+            "started_at": started_at.isoformat(),
+            "duration_ms": round((time.monotonic() - started) * 1000),
+            "error": "",
+            "interval": interval,
+            "next_due": (updated_at + timedelta(seconds=interval)).isoformat(),
+        }
+    except TimeoutError:
+        logger.warning("Collector for %s timed out after %ss", sid, COLLECTOR_TIMEOUT)
+        service_stats.setdefault(sid, {})
+        _mark_failed(sid, started_at, started, f"timed out after {COLLECTOR_TIMEOUT}s", interval)
+    except Exception as exc:
         logger.warning(f"Collector for {sid} failed", exc_info=True)
         service_stats.setdefault(sid, {})
+        _mark_failed(sid, started_at, started, str(exc)[:180], interval)
+
+
+def _collector_interval(sid: str) -> int:
+    if sid in HEAVY_COLLECTORS:
+        return HEAVY_STATS_INTERVAL
+    return SYSTEM_STATS_INTERVAL if sid == "system" else STATS_INTERVAL
+
+
+def _mark_failed(sid: str, started_at: datetime, started: float, error: str, interval: int) -> None:
+    now = datetime.now(UTC)
+    stats_meta[sid] = {
+        **stats_meta.get(sid, {}),
+        "ok": False,
+        "stale": sid in stats_updated_at,
+        "running": False,
+        "started_at": started_at.isoformat(),
+        "duration_ms": round((time.monotonic() - started) * 1000),
+        "error": error,
+        "interval": interval,
+        "next_due": (now + timedelta(seconds=interval)).isoformat(),
+    }
+
+
+async def _collector_loop(sid: str, initial_delay: float) -> None:
+    await asyncio.sleep(initial_delay)
+    while True:
+        started = time.monotonic()
+        await _collect_one(sid)
+        interval = _collector_interval(sid)
+        await asyncio.sleep(max(0.0, interval - (time.monotonic() - started)))
+
+
+async def _github_loop() -> None:
+    await refresh_github_versions()
+    while True:
+        await asyncio.sleep(GITHUB_INTERVAL)
+        await refresh_github_versions()
 
 
 async def stats_loop() -> None:
-    """Stagger startup then refresh every STATS_INTERVAL seconds."""
-    for sid in _COLLECTORS:
-        task = asyncio.create_task(_collect_one(sid))
-        _background_tasks.add(task)
+    """Run each collector on its own cache interval."""
+    tasks = [
+        asyncio.create_task(_collector_loop(sid, initial_delay=i * 0.25), name=f"stats:{sid}")
+        for i, sid in enumerate(_COLLECTORS)
+    ]
+    tasks.append(asyncio.create_task(_github_loop(), name="stats:github"))
+    _background_tasks.update(tasks)
+    for task in tasks:
         task.add_done_callback(_background_tasks.discard)
-        await asyncio.sleep(0.25)
-    task = asyncio.create_task(refresh_github_versions())
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-
-    last_github = time.monotonic()
-    while True:
-        await asyncio.sleep(STATS_INTERVAL)
-        await asyncio.gather(
-            *[_collect_one(sid) for sid in _COLLECTORS],
-            return_exceptions=True,
-        )
-        if time.monotonic() - last_github > GITHUB_INTERVAL:
-            task = asyncio.create_task(refresh_github_versions())
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
-            last_github = time.monotonic()
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            task.cancel()
+        with suppress(Exception):
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 __all__ = [
@@ -106,5 +168,6 @@ __all__ = [
     "github_versions",
     "service_stats",
     "stats_loop",
+    "stats_meta",
     "stats_updated_at",
 ]

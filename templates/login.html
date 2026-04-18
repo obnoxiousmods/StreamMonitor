@@ -10,7 +10,7 @@
     <meta property="og:title" content="StreamMonitor" />
     <meta property="og:description" content="Infrastructure monitoring for streaming and media services" />
     <meta property="og:type" content="website" />
-    <link rel="stylesheet" href="/static/css/login.css" />
+    <link rel="stylesheet" href="/static/css/login.css?v={{ static_version }}" />
   </head>
   <body>
     <div class="stars" id="stars"></div>
@@ -180,7 +180,7 @@
       const SPEEDTEST_CF_URL = {{ speedtest_cf_url|tojson }};
       const SPEEDTEST_CF_NAME = {{ speedtest_cf_name|tojson }};
     </script>
-    <script src="/static/js/axios.min.js"></script>
-    <script src="/static/js/login.js"></script>
+    <script src="/static/js/axios.min.js?v={{ static_version }}"></script>
+    <script src="/static/js/login.js?v={{ static_version }}"></script>
   </body>
 </html>

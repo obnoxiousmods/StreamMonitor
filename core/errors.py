@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import core.config as cfg
+from core.process import run_command
 
 logger = logging.getLogger(__name__)
 
@@ -355,25 +356,25 @@ async def _scan_plex_files(since: float) -> list[dict]:
 async def _scan_unit(sid: str, unit: str, since: str) -> list[dict]:
     found: list[dict] = []
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "sudo",
-            "journalctl",
-            "-u",
-            unit,
-            "--since",
-            since,
-            "--no-pager",
-            "--output=short-iso",
-            # No -p filter: many apps log everything at INFO journald priority
-            # but embed their own level in the message (Comet, AIOStreams, etc.)
-            # Limit lines to avoid overwhelming the scanner
-            "-n",
-            "2000",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+        result = await run_command(
+            [
+                "sudo",
+                "journalctl",
+                "-u",
+                unit,
+                "--since",
+                since,
+                "--no-pager",
+                "--output=short-iso",
+                # No -p filter: many apps log everything at INFO journald priority
+                # but embed their own level in the message (Comet, AIOStreams, etc.)
+                # Limit lines to avoid overwhelming the scanner
+                "-n",
+                "2000",
+            ],
+            timeout=20,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
-        lines = out.decode(errors="replace").splitlines()
+        lines = result.stdout.splitlines()
         i = 0
         while i < len(lines):
             line = lines[i].strip()

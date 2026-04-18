@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+
+from core.process import CommandTimeoutError, run_command
 
 
 async def api_dmesg(request: Request):
@@ -16,22 +16,12 @@ async def api_dmesg(request: Request):
         lines = 100
 
     try:
-        p = await asyncio.create_subprocess_exec(
-            "sudo",
-            "journalctl",
-            "-k",
-            "--no-pager",
-            "-n",
-            str(lines),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await asyncio.wait_for(p.communicate(), timeout=15)
-        result_lines = out.decode(errors="replace").splitlines()
-        if not result_lines and err:
-            result_lines = [f"[journalctl] {err.decode(errors='replace').strip()}"]
+        result = await run_command(["sudo", "journalctl", "-k", "--no-pager", "-n", str(lines)], timeout=15)
+        result_lines = result.stdout.splitlines()
+        if not result_lines and result.stderr:
+            result_lines = [f"[journalctl] {result.stderr.strip()}"]
         return JSONResponse({"lines": result_lines})
-    except TimeoutError:
+    except CommandTimeoutError:
         return JSONResponse({"error": "timeout"}, status_code=504)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

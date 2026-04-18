@@ -14,6 +14,18 @@ from starlette.templating import Jinja2Templates
 import core.config as cfg
 
 _templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
+_BASE_DIR = Path(__file__).parent.parent
+_STATIC_VERSION = str(
+    max(
+        int(path.stat().st_mtime)
+        for path in [
+            _BASE_DIR / "static" / "css" / "speedtest.css",
+            _BASE_DIR / "static" / "js" / "speedtest.js",
+            _BASE_DIR / "static" / "js" / "axios.min.js",
+        ]
+        if path.exists()
+    )
+)
 
 # ── Rate limiting: 20 tests per 10 minutes per IP ────────────────────────────
 _rate: dict[str, list[float]] = defaultdict(list)
@@ -92,5 +104,6 @@ async def speedtest_page(request: Request):
             "speedtest_direct_name": cfg.SPEEDTEST_DIRECT_NAME,
             "speedtest_cf_url": cfg.SPEEDTEST_CF_URL,
             "speedtest_cf_name": cfg.SPEEDTEST_CF_NAME,
+            "static_version": _STATIC_VERSION,
         },
     )

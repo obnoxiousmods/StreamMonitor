@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""StreamMonitor — main application: routes, auth, Jinja2 dashboard."""
+"""StreamMonitor main application: Starlette API and React dashboard."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
 import os
 import secrets
+import subprocess
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -17,13 +17,13 @@ from pathlib import Path
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from starlette.applications import Starlette
+from starlette.datastructures import MutableHeaders
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
-from starlette.templating import Jinja2Templates
 
 import core.config as cfg
 import core.errors as _errors
@@ -31,6 +31,7 @@ import core.health as _health
 import core.logging_config  # noqa: F401 — side-effect import
 import core.perms as _perms
 import stats as _stats
+from core.process import CommandTimeoutError, run_command
 from routes.aiostreams import api_aiostreams_analyze, api_aiostreams_test
 from routes.benchmark import TITLES as BENCH_TITLES
 from routes.benchmark import api_benchmark
@@ -40,13 +41,45 @@ from routes.mediafusion import api_mediafusion_analyze, api_mediafusion_metrics
 from routes.packages import api_packages
 from routes.processes import api_processes
 from routes.public import api_public
-from routes.speedtest import speedtest_download, speedtest_page
+from routes.speedtest import speedtest_download
 
 logger = logging.getLogger(__name__)
 
 _BASE_DIR = Path(__file__).parent
-templates = Jinja2Templates(directory=str(_BASE_DIR / "templates"))
+_SPA_INDEX = _BASE_DIR / "static" / "app" / "index.html"
 _background_tasks: set[asyncio.Task] = set()
+
+
+def _static_version() -> str:
+    versioned = [
+        *(_BASE_DIR / "static" / "app").glob("**/*"),
+        *(_BASE_DIR / "static" / "js").glob("*.js"),
+        *(_BASE_DIR / "static" / "css").glob("*.css"),
+        *(_BASE_DIR / "templates").glob("*.html"),
+    ]
+    try:
+        mtime_version = str(max(int(path.stat().st_mtime) for path in versioned))
+    except Exception:
+        mtime_version = str(int(time.time()))
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            cwd=_BASE_DIR,
+            capture_output=True,
+            text=True,
+            timeout=1,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return f"{result.stdout.strip()}-{mtime_version}"
+    except Exception:
+        pass
+
+    return mtime_version
+
+
+STATIC_VERSION = _static_version()
 
 # ── Auth config ────────────────────────────────────────────────────────────────
 SECRET_KEY = os.environ.get("MONITOR_SECRET", secrets.token_hex(32))
@@ -112,24 +145,84 @@ def require_auth(fn):
     return wrapped
 
 
-# ── Template context helpers ──────────────────────────────────────────────────
-_UNIT_OPTS = "\n".join(
-    f'<option value="{c["unit"]}">{c["name"]}</option>' for c in cfg.SERVICES.values() if c.get("unit")
-)
+def _spa_response() -> FileResponse | HTMLResponse:
+    if _SPA_INDEX.exists():
+        return FileResponse(_SPA_INDEX)
+    return HTMLResponse(
+        (
+            "<!doctype html><title>StreamMonitor</title>"
+            "<p>React frontend has not been built. Run <code>npm run build</code>.</p>"
+        ),
+        status_code=503,
+    )
 
-_SPEEDTEST_CTX = {
-    "speedtest_direct_url": cfg.SPEEDTEST_DIRECT_URL,
-    "speedtest_direct_name": cfg.SPEEDTEST_DIRECT_NAME,
-    "speedtest_cf_url": cfg.SPEEDTEST_CF_URL,
-    "speedtest_cf_name": cfg.SPEEDTEST_CF_NAME,
-}
+
+def _public_config() -> dict:
+    return {
+        "speedtest": {
+            "direct_url": cfg.SPEEDTEST_DIRECT_URL,
+            "direct_name": cfg.SPEEDTEST_DIRECT_NAME,
+            "cf_url": cfg.SPEEDTEST_CF_URL,
+            "cf_name": cfg.SPEEDTEST_CF_NAME,
+        }
+    }
+
+
+def _bootstrap_config() -> dict:
+    return {
+        **_public_config(),
+        "categories": cfg.CATEGORIES,
+        "web_urls": cfg.WEB_URLS,
+        "bench_titles": BENCH_TITLES,
+        "services": {
+            sid: {
+                "id": sid,
+                "name": svc.get("name", sid),
+                "unit": svc.get("unit"),
+                "category": svc.get("category", "other"),
+                "has_http": bool(svc.get("url")),
+                "web_url": cfg.WEB_URLS.get(sid, ""),
+            }
+            for sid, svc in cfg.SERVICES.items()
+        },
+        "log_units": [
+            {"id": sid, "name": svc.get("name", sid), "unit": svc.get("unit")}
+            for sid, svc in cfg.SERVICES.items()
+            if svc.get("unit")
+        ],
+    }
+
+
+# ── Cache policy ─────────────────────────────────────────────────────────────
+class CacheHeadersMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+
+        async def send_with_cache_headers(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                if path.startswith("/api/") or path in {"/", "/login", "/logout", "/speedtest"}:
+                    headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+                    headers["Pragma"] = "no-cache"
+                    headers["Expires"] = "0"
+                elif path.startswith("/static/"):
+                    headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            await send(message)
+
+        await self.app(scope, receive, send_with_cache_headers)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 
 async def login(request: Request):
-    err = ""
     if request.method == "POST":
         try:
             f = await request.form()
@@ -139,15 +232,9 @@ async def login(request: Request):
                 logger.info(f"Login succeeded for user {username!r} from {request.client.host}")
                 return RedirectResponse("/", status_code=303)
             logger.info(f"Login failed for user {username!r} from {request.client.host}")
-            err = "Invalid credentials"
         except Exception:
-            err = "Login error — try again"
-    error_html = f'<p class="err">{err}</p>' if err else ""
-    return templates.TemplateResponse(
-        request,
-        "login.html",
-        {"error_html": error_html} | _SPEEDTEST_CTX,
-    )
+            pass
+    return _spa_response()
 
 
 async def logout(request: Request):
@@ -157,20 +244,49 @@ async def logout(request: Request):
 
 @require_auth
 async def dashboard(request: Request):
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "units_html": _UNIT_OPTS,
-            "web_urls_json": json.dumps(cfg.WEB_URLS),
-            "bench_titles_json": json.dumps(BENCH_TITLES),
-        }
-        | _SPEEDTEST_CTX,
-    )
+    return _spa_response()
+
+
+@require_auth
+async def speedtest_spa(request: Request):
+    return _spa_response()
 
 
 async def ping(request: Request):
     return JSONResponse({"ok": True, "ts": datetime.now(UTC).isoformat()})
+
+
+async def api_public_config(request: Request):
+    return JSONResponse(_public_config())
+
+
+async def api_auth_session(request: Request):
+    return JSONResponse({"authenticated": logged_in(request), "user": "admin" if logged_in(request) else None})
+
+
+async def api_auth_login(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    username = str(body.get("username", ""))
+    password = str(body.get("password", ""))
+    if check_pw(username, password):
+        request.session["user"] = "admin"
+        logger.info("Login succeeded for user %r from %s", username, request.client.host if request.client else "?")
+        return JSONResponse({"ok": True})
+    logger.info("Login failed for user %r from %s", username, request.client.host if request.client else "?")
+    return JSONResponse({"ok": False, "error": "Invalid credentials"}, status_code=401)
+
+
+async def api_auth_logout(request: Request):
+    request.session.clear()
+    return JSONResponse({"ok": True})
+
+
+@require_auth
+async def api_bootstrap(request: Request):
+    return JSONResponse(_bootstrap_config())
 
 
 @require_auth
@@ -211,9 +327,15 @@ async def api_stats(request: Request):
             {
                 "stats": _stats.service_stats.get(sid, {}),
                 "updated_at": _stats.stats_updated_at.get(sid),
+                "meta": _stats.stats_meta.get(sid, {}),
             }
         )
     return JSONResponse(_stats.service_stats)
+
+
+@require_auth
+async def api_stats_meta(request: Request):
+    return JSONResponse(_stats.stats_meta)
 
 
 @require_auth
@@ -245,24 +367,15 @@ async def api_logs(request: Request):
     except (ValueError, TypeError):
         n = "200"
     try:
-        p = await asyncio.create_subprocess_exec(
-            "sudo",
-            "journalctl",
-            "-u",
-            unit,
-            "-n",
-            n,
-            "--no-pager",
-            "--output=short-iso",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        result = await run_command(
+            ["sudo", "journalctl", "-u", unit, "-n", n, "--no-pager", "--output=short-iso"],
+            timeout=15,
         )
-        out, err = await asyncio.wait_for(p.communicate(), timeout=15)
-        lines = out.decode(errors="replace").splitlines()
-        if not lines and err:
-            lines = [f"[journalctl] {err.decode(errors='replace').strip()}"]
+        lines = result.stdout.splitlines()
+        if not lines and result.stderr:
+            lines = [f"[journalctl] {result.stderr.strip()}"]
         return JSONResponse({"unit": unit, "lines": lines})
-    except TimeoutError:
+    except CommandTimeoutError:
         return JSONResponse({"error": "timeout"}, status_code=504)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -435,22 +548,14 @@ async def api_service_action(request: Request):
     if action not in ("start", "stop", "restart"):
         return JSONResponse({"error": "invalid action"}, status_code=400)
     try:
-        p = await asyncio.create_subprocess_exec(
-            "sudo",
-            "systemctl",
-            action,
-            unit,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _out, err = await asyncio.wait_for(p.communicate(), timeout=30)
-        if p.returncode == 0:
+        result = await run_command(["sudo", "systemctl", action, unit], timeout=30)
+        if result.returncode == 0:
             logger.info(f"Service action {action} on unit {unit} succeeded")
             return JSONResponse({"ok": True})
-        err_msg = err.decode().strip()[:200]
+        err_msg = result.stderr.strip()[:200]
         logger.warning(f"Service action {action} on unit {unit} failed: {err_msg}")
-        return JSONResponse({"error": err.decode().strip()[:300]}, status_code=500)
-    except TimeoutError:
+        return JSONResponse({"error": result.stderr.strip()[:300]}, status_code=500)
+    except CommandTimeoutError:
         return JSONResponse({"error": "systemctl timed out"}, status_code=504)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -464,9 +569,15 @@ app = Starlette(
         Route("/logout", logout),
         Route("/", dashboard),
         Route("/api/ping", ping),
+        Route("/api/public-config", api_public_config),
+        Route("/api/bootstrap", api_bootstrap),
+        Route("/api/auth/session", api_auth_session),
+        Route("/api/auth/login", api_auth_login, methods=["POST"]),
+        Route("/api/auth/logout", api_auth_logout, methods=["POST"]),
         Route("/api/status", api_status),
         Route("/api/status/{service_id}", api_status),
         Route("/api/stats", api_stats),
+        Route("/api/stats/meta", api_stats_meta),
         Route("/api/stats/{service_id}", api_stats),
         Route("/api/versions", api_versions),
         Route("/api/logs/{unit}", api_logs),
@@ -488,9 +599,12 @@ app = Starlette(
         Route("/api/mediafusion/metrics", require_auth(api_mediafusion_metrics)),
         Route("/api/mediafusion/analyze", require_auth(api_mediafusion_analyze)),
         Route("/api/public", api_public),
-        Route("/speedtest", require_auth(speedtest_page)),
+        Route("/speedtest", speedtest_spa),
         Route("/speedtest/download", speedtest_download),
         Mount("/static", StaticFiles(directory=str(_BASE_DIR / "static")), name="static"),
     ],
-    middleware=[Middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=86400)],
+    middleware=[
+        Middleware(CacheHeadersMiddleware),
+        Middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=86400),
+    ],
 )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import logging
 import re
 import time
@@ -13,7 +14,45 @@ from xml.etree import ElementTree as ET
 import httpx
 
 import core.config as cfg
+from core.process import run_command
 from stats.base import _get, _get_raw
+
+_PSQL_ENV = {"PGCONNECT_TIMEOUT": "3", "PGAPPNAME": "streammonitor"}
+
+
+async def _run_psql(user: str, database: str, sql: str, *, timeout: float = 5) -> str:
+    result = await run_command(
+        [
+            "psql",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            "6432",
+            "-U",
+            user,
+            "-d",
+            database,
+            "-t",
+            "-A",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            sql,
+        ],
+        timeout=timeout,
+        env=_PSQL_ENV,
+    )
+    return result.stdout.strip()
+
+
+async def _run_sqlite(database: str, sql: str, *, timeout: float = 5) -> str:
+    result = await run_command(["sqlite3", database, sql], timeout=timeout)
+    return result.stdout.strip()
+
+
+async def _run_stdout(cmd: list[str], *, timeout: float = 5) -> str:
+    result = await run_command(cmd, timeout=timeout)
+    return result.stdout.strip()
 
 # ── Comet admin session cache ─────────────────────────────────────────────────
 _comet_session: str = ""
@@ -51,6 +90,9 @@ async def _get_comet_session() -> str:
 # ── Dispatcharr JWT cache ─────────────────────────────────────────────────────
 _dispatcharr_token: str = ""
 _dispatcharr_token_expiry: float = 0.0
+_stremthru_db_cache: dict = {}
+_stremthru_db_cache_ts: float = 0.0
+_STREMTHRU_DB_TTL = 300
 
 
 async def _get_dispatcharr_token() -> str:
@@ -137,25 +179,7 @@ async def collect_comet() -> dict:
         try:
             import json as _json
 
-            proc = await asyncio.create_subprocess_exec(
-                "psql",
-                "-h",
-                "127.0.0.1",
-                "-p",
-                "6432",
-                "-U",
-                "comet",
-                "-d",
-                "comet",
-                "-t",
-                "-A",
-                "-c",
-                "SELECT payload_json FROM metrics_cache LIMIT 1;",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-            payload = out.decode().strip()
+            payload = await _run_psql("comet", "comet", "SELECT payload_json FROM metrics_cache LIMIT 1;")
             if payload:
                 cached = _json.loads(payload)
                 t = cached.get("torrents", {})
@@ -169,25 +193,11 @@ async def collect_comet() -> dict:
     # Last resort: estimated count from pg_class stats
     if "torrents_total" not in result:
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "psql",
-                "-h",
-                "127.0.0.1",
-                "-p",
-                "6432",
-                "-U",
+            val = await _run_psql(
                 "comet",
-                "-d",
                 "comet",
-                "-t",
-                "-A",
-                "-c",
                 "SELECT reltuples::bigint FROM pg_class WHERE relname = 'torrents';",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
             )
-            out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-            val = out.decode().strip()
             if val.lstrip("-").isdigit() and int(val) > 0:
                 result["torrents_total"] = int(val)
         except Exception:
@@ -298,19 +308,9 @@ async def collect_mediafusion() -> dict:
     # Direct DB stats (always available via pgbouncer, doesn't need admin auth)
     if "streams_total" not in result:
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "psql",
-                "-h",
-                "127.0.0.1",
-                "-p",
-                "6432",
-                "-U",
+            out = await _run_psql(
                 "mediafusion",
-                "-d",
                 "mediafusion",
-                "-t",
-                "-A",
-                "-c",
                 "SELECT "
                 "(SELECT COUNT(*) FROM torrent_stream),"
                 "(SELECT COUNT(*) FROM stream),"
@@ -318,11 +318,8 @@ async def collect_mediafusion() -> dict:
                 "(SELECT COUNT(*) FROM media WHERE type='movie'),"
                 "(SELECT COUNT(*) FROM media WHERE type='series'),"
                 "(SELECT COUNT(*) FROM user_profiles);",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
             )
-            out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-            parts = out.decode().strip().split("|")
+            parts = out.split("|")
             if len(parts) >= 6:
                 result["torrents_db"] = int(parts[0])
                 result["streams_total"] = int(parts[1])
@@ -334,28 +331,12 @@ async def collect_mediafusion() -> dict:
             pass
 
     # Scraper health from public indexer source count
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "psql",
-            "-h",
-            "127.0.0.1",
-            "-p",
-            "6432",
-            "-U",
+    with contextlib.suppress(Exception):
+        result["db_size"] = await _run_psql(
             "mediafusion",
-            "-d",
             "mediafusion",
-            "-t",
-            "-A",
-            "-c",
             "SELECT pg_size_pretty(pg_database_size('mediafusion'));",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        result["db_size"] = out.decode().strip()
-    except Exception:
-        pass
 
     return result
 
@@ -382,59 +363,54 @@ async def collect_stremthru() -> dict:
             result["store_name"] = data.get("name", "")
             result["subscription"] = data.get("subscription_status", "")
 
-    # Magnet cache stats from SQLite
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "sqlite3",
-            cfg.STREMTHRU_DB,
-            "SELECT store, is_cached, COUNT(*) FROM magnet_cache GROUP BY store, is_cached;",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        cache_stats: dict = {}
-        for line in out.decode().strip().splitlines():
-            parts = line.split("|")
-            if len(parts) == 3:
-                store, cached, count = parts[0], parts[1], int(parts[2])
-                cache_stats.setdefault(store, {"cached": 0, "uncached": 0})
-                cache_stats[store]["cached" if cached == "1" else "uncached"] = count
-        result["magnet_cache"] = cache_stats
-        result["magnet_total"] = sum(s["cached"] + s["uncached"] for s in cache_stats.values())
-    except Exception:
-        pass
+    global _stremthru_db_cache, _stremthru_db_cache_ts
+    now = time.monotonic()
+    if _stremthru_db_cache and now - _stremthru_db_cache_ts < _STREMTHRU_DB_TTL:
+        result.update(_stremthru_db_cache)
+    elif now - _stremthru_db_cache_ts >= _STREMTHRU_DB_TTL:
+        db_stats: dict = {}
+        _stremthru_db_cache_ts = now
 
-    # Torrent info count
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "sqlite3",
-            cfg.STREMTHRU_DB,
-            "SELECT COUNT(*) FROM torrent_info;",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        val = out.decode().strip()
-        if val.isdigit():
-            result["torrent_info_count"] = int(val)
-    except Exception:
-        pass
+        # Magnet cache stats from SQLite
+        try:
+            out = await _run_sqlite(
+                cfg.STREMTHRU_DB,
+                "SELECT store, is_cached, COUNT(*) FROM magnet_cache GROUP BY store, is_cached;",
+                timeout=3,
+            )
+            cache_stats: dict = {}
+            for line in out.splitlines():
+                parts = line.split("|")
+                if len(parts) == 3:
+                    store, cached, count = parts[0], parts[1], int(parts[2])
+                    cache_stats.setdefault(store, {"cached": 0, "uncached": 0})
+                    cache_stats[store]["cached" if cached == "1" else "uncached"] = count
+            db_stats["magnet_cache"] = cache_stats
+            db_stats["magnet_total"] = sum(s["cached"] + s["uncached"] for s in cache_stats.values())
+        except Exception:
+            pass
 
-    # DMM hashlist count
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "sqlite3",
-            cfg.STREMTHRU_DB,
-            "SELECT COUNT(*) FROM dmm_hashlist;",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        val = out.decode().strip()
-        if val.isdigit():
-            result["dmm_hashes"] = int(val)
-    except Exception:
-        pass
+        # Torrent info count
+        try:
+            val = await _run_sqlite(cfg.STREMTHRU_DB, "SELECT COUNT(*) FROM torrent_info;", timeout=3)
+            if val.isdigit():
+                db_stats["torrent_info_count"] = int(val)
+        except Exception:
+            pass
+
+        # DMM hashlist count
+        try:
+            val = await _run_sqlite(cfg.STREMTHRU_DB, "SELECT COUNT(*) FROM dmm_hashlist;", timeout=3)
+            if val.isdigit():
+                db_stats["dmm_hashes"] = int(val)
+        except Exception:
+            pass
+
+        if db_stats:
+            _stremthru_db_cache = db_stats
+            result.update(db_stats)
+        elif _stremthru_db_cache:
+            result.update(_stremthru_db_cache)
 
     # DB file size
     try:
@@ -476,25 +452,12 @@ async def collect_zilean() -> dict:
 
     # DB stats via psql (fast queries on indexed columns)
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "psql",
-            "-h",
-            "127.0.0.1",
-            "-p",
-            "6432",
-            "-U",
+        out = await _run_psql(
             "zilean",
-            "-d",
             "zilean",
-            "-t",
-            "-A",
-            "-c",
             'SELECT COUNT(*), COUNT(CASE WHEN "ImdbId" IS NOT NULL THEN 1 END) FROM "Torrents";',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        parts = out.decode().strip().split("|")
+        parts = out.split("|")
         if len(parts) == 2:
             result["total_torrents"] = int(parts[0])
             result["with_imdb"] = int(parts[1])
@@ -503,28 +466,15 @@ async def collect_zilean() -> dict:
 
     # Quality distribution from DB
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "psql",
-            "-h",
-            "127.0.0.1",
-            "-p",
-            "6432",
-            "-U",
+        out = await _run_psql(
             "zilean",
-            "-d",
             "zilean",
-            "-t",
-            "-A",
-            "-c",
             'SELECT "Resolution", COUNT(*) FROM "Torrents"'
             " WHERE \"Resolution\" IN ('1080p','2160p','720p','480p','unknown')"
             ' GROUP BY "Resolution" ORDER BY COUNT(*) DESC;',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
         quality_dist = {}
-        for line in out.decode().strip().splitlines():
+        for line in out.splitlines():
             parts = line.split("|")
             if len(parts) == 2:
                 quality_dist[parts[0]] = int(parts[1])
@@ -535,27 +485,10 @@ async def collect_zilean() -> dict:
 
     # Import metadata (DMM scrape status)
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "psql",
-            "-h",
-            "127.0.0.1",
-            "-p",
-            "6432",
-            "-U",
-            "zilean",
-            "-d",
-            "zilean",
-            "-t",
-            "-A",
-            "-c",
-            'SELECT "Key", "Value"::text FROM "ImportMetadata";',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        out = await _run_psql("zilean", "zilean", 'SELECT "Key", "Value"::text FROM "ImportMetadata";')
         import json as _json
 
-        for line in out.decode().strip().splitlines():
+        for line in out.splitlines():
             if "|" not in line:
                 continue
             key, val = line.split("|", 1)
@@ -576,41 +509,18 @@ async def collect_zilean() -> dict:
 
     # Scraper child process check
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "pgrep",
-            "-f",
-            "zilean.*scraper.*dmm",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
-        result["scraper_running"] = bool(out.decode().strip())
+        out = await _run_stdout(["pgrep", "-f", "zilean.*scraper.*dmm"], timeout=3)
+        result["scraper_running"] = bool(out)
     except Exception:
         pass
 
     # DB size
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "psql",
-            "-h",
-            "127.0.0.1",
-            "-p",
-            "6432",
-            "-U",
+    with contextlib.suppress(Exception):
+        result["db_size"] = await _run_psql(
             "zilean",
-            "-d",
             "zilean",
-            "-t",
-            "-A",
-            "-c",
             "SELECT pg_size_pretty(pg_database_size('zilean'));",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        result["db_size"] = out.decode().strip()
-    except Exception:
-        pass
 
     return result
 
@@ -660,15 +570,7 @@ async def collect_aiostreams() -> dict:
 
     # User count from SQLite
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "sqlite3",
-            cfg.AIOSTREAMS_DB,
-            "SELECT COUNT(*) FROM USERS;",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
-        val = out.decode().strip()
+        val = await _run_sqlite(cfg.AIOSTREAMS_DB, "SELECT COUNT(*) FROM USERS;", timeout=3)
         if val.isdigit():
             result["user_count"] = int(val)
     except Exception:
@@ -676,15 +578,7 @@ async def collect_aiostreams() -> dict:
 
     # DB cache size
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "sqlite3",
-            cfg.AIOSTREAMS_DB,
-            "SELECT COUNT(*) FROM cache;",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
-        val = out.decode().strip()
+        val = await _run_sqlite(cfg.AIOSTREAMS_DB, "SELECT COUNT(*) FROM cache;", timeout=3)
         if val.isdigit():
             result["cache_entries"] = int(val)
     except Exception:
@@ -707,15 +601,7 @@ async def collect_jackett() -> dict:
     if indexer_dir.exists():
         result["indexers_configured"] = len(list(indexer_dir.glob("*.json")))
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "pacman",
-            "-Q",
-            "jackett",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
-        out = stdout.decode().strip()
+        out = await _run_stdout(["pacman", "-Q", "jackett"])
         if out:
             result["version"] = out.split()[-1] if " " in out else out
     except Exception:

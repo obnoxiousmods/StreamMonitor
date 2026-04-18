@@ -11,13 +11,22 @@ const CATEGORY_LABELS = {
   other: 'Other',
 }
 
+const STATUS_REFRESH_MS = 5000
+const STATS_REFRESH_MS = 15000
+const VERSIONS_REFRESH_MS = 300000
+
 // ── State ──
 let statusData = {}
 let statsData = {}
+let statsMetaData = {}
 let versionsData = {}
 let logRefreshTimer = null
 let logsInitialized = false
 let currentLogUnit = ''
+let lastSuccessfulRefresh = 0
+let lastSystemStatsRefresh = 0
+let lastStatsRefresh = 0
+let lastVersionsRefresh = 0
 
 // ── Tabs ──
 function switchTab(tabName, tabElement) {
@@ -37,6 +46,8 @@ function escapeHtml(str) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 function formatNumber(num) {
@@ -70,6 +81,69 @@ function systemRow(label, value, colorClass = '') {
 function systemBar(percent, colorClass = '') {
   const clampedPercent = Math.min(Math.max(percent, 0), 100).toFixed(1)
   return `<div class="sys-bar"><div class="sys-bar-fill ${colorClass}" style="width:${clampedPercent}%"></div></div>`
+}
+
+function gpuPercent(value) {
+  return value == null ? '—' : `${value}%`
+}
+
+function renderGpuProcesses(gpu) {
+  const processes = Array.isArray(gpu.processes) ? gpu.processes : []
+  if (!processes.length) return ''
+
+  let html = '<div class="gpu-procs">'
+  html += '<div class="gpu-proc-head"><span>GPU processes</span><span>VRAM / engines</span></div>'
+  for (const proc of processes) {
+    const name = proc.name || proc.process_name || proc.command || 'unknown'
+    const mem = proc.used_memory_mb != null ? `${proc.used_memory_mb} MB` : '—'
+    const procType = proc.type ? ` · ${proc.type}` : ''
+    const procUser = proc.user ? ` · ${proc.user}` : ''
+    const title = proc.cmd || proc.exe || proc.process_name || name
+    const engineText =
+      ['sm', 'mem', 'enc', 'dec', 'jpg', 'ofa']
+        .map((key) => (proc[`${key}_pct`] != null ? `${key.toUpperCase()} ${proc[`${key}_pct`]}%` : ''))
+        .filter(Boolean)
+        .join(' · ') || 'idle'
+    html += `<div class="gpu-proc" title="${escapeHtml(title)}">`
+    html += `<div class="gpu-proc-name">${escapeHtml(name)}</div>`
+    html += `<div class="gpu-proc-pid">pid ${escapeHtml(proc.pid)}${escapeHtml(procType)}${escapeHtml(procUser)}</div>`
+    html += `<div class="gpu-proc-mem">${escapeHtml(mem)}</div>`
+    html += `<div class="gpu-proc-eng">${escapeHtml(engineText)}</div>`
+    html += '</div>'
+  }
+  html += '</div>'
+  return html
+}
+
+function processCpuColor(cpuPct) {
+  return cpuPct > 100 ? 'err' : cpuPct > 50 ? 'warn' : cpuPct > 0 ? 'ok' : 'muted'
+}
+
+function processMemoryColor(memPct) {
+  return memPct > 20 ? 'warn' : memPct > 5 ? 'ok' : 'muted'
+}
+
+function renderProcessMiniList(processes, mode) {
+  if (!Array.isArray(processes) || !processes.length) return ''
+  const rows = processes.slice(0, 10)
+  const values = rows.map((p) => (mode === 'memory' ? p.mem_mb || 0 : p.cpu_pct || 0))
+  const maxValue = Math.max(...values, 0.1)
+  let html = ''
+  for (const p of rows) {
+    const value = mode === 'memory' ? p.mem_mb || 0 : p.cpu_pct || 0
+    const color = mode === 'memory' ? processMemoryColor(p.mem_pct || 0) : processCpuColor(p.cpu_pct || 0)
+    const barWidth = Math.min((value / maxValue) * 100, 100).toFixed(1)
+    const primary = mode === 'memory' ? `${value.toFixed(1)}M` : `${value.toFixed(1)}%`
+    const secondary = mode === 'memory' ? `${(p.mem_pct || 0).toFixed(1)}%` : `${(p.mem_mb || 0).toFixed(1)}M`
+    const title = `${p.cmd || p.name || 'unknown'} · pid ${p.pid} · host CPU ${(p.cpu_total_pct || 0).toFixed(1)}%`
+    html += `<div class="proc-row" title="${escapeHtml(title)}">`
+    html += `<span class="proc-name">${escapeHtml(p.name || 'unknown')}</span>`
+    html += `<span class="proc-cpu" style="color:var(--${color})">${escapeHtml(primary)}</span>`
+    html += `<span class="proc-mem">${escapeHtml(secondary)}</span>`
+    html += '</div>'
+    html += `<div class="proc-mini-bar"><div style="width:${barWidth}%;background:var(--${color})"></div></div>`
+  }
+  return html
 }
 
 function formatDataRate(bytesPerSec) {
@@ -227,9 +301,16 @@ function renderSystem(systemStats) {
     html += systemBar(ram.percent, ramColor)
     html += systemRow('Available', `${ram.available_gb} GB`, 'ok')
     if (systemStats.swap?.total_gb > 0) {
-      const swapColor = systemStats.swap.percent > 80 ? 'warn' : ''
-      html += systemRow('Swap', `${systemStats.swap.used_gb} / ${systemStats.swap.total_gb} GB`)
-      if (systemStats.swap.percent > 0) html += systemBar(systemStats.swap.percent, swapColor)
+      const swap = systemStats.swap
+      const activePercent = swap.active_percent ?? swap.percent ?? 0
+      const swapColor = activePercent > 95 ? 'err' : activePercent > 80 ? 'warn' : ''
+      const activeGb = swap.active_gb ?? swap.used_gb
+      html += systemRow('Swap active / total', `${activeGb} / ${swap.total_gb} GB`, swapColor)
+      if (activePercent > 0) html += systemBar(activePercent, swapColor)
+      if (swap.cached_gb > 0 || swap.free_gb != null) {
+        html += systemRow('Swap alloc / free', `${swap.used_gb} / ${swap.free_gb ?? '—'} GB`)
+        if (swap.cached_gb > 0) html += systemRow('Swap cached', `${swap.cached_gb} GB`, 'ok')
+      }
     }
     html += '</div>'
   }
@@ -249,8 +330,9 @@ function renderSystem(systemStats) {
     if (gpu.engines) {
       const engineNames = {
         // AMD / Intel fdinfo engine names
-        compute: 'Compute', enc: 'Encode', dec: 'Decode', gfx: '3D', dma: 'DMA',
+        compute: 'Compute', sm: 'SM', mem: 'GPU Mem', enc: 'Encode', dec: 'Decode', gfx: '3D', dma: 'DMA',
         render: '3D', copy: 'Copy', video: 'Video', 'video enhance': 'Vid Enh',
+        jpg: 'JPEG', ofa: 'Optical Flow',
         // NVIDIA nvidia-smi names already mapped to enc/dec above
       }
       for (const [eng, pct] of Object.entries(gpu.engines)) {
@@ -258,6 +340,11 @@ function renderSystem(systemStats) {
         const ec = pct > 80 ? 'err' : pct > 40 ? 'warn' : 'ok'
         html += systemRow(label, `${pct}%`, ec)
       }
+    }
+    if (gpu.encoder_sessions != null && gpu.encoder_sessions > 0) {
+      const fpsText = gpu.encoder_avg_fps != null ? ` · ${gpu.encoder_avg_fps} fps` : ''
+      const latencyText = gpu.encoder_avg_latency_ms != null ? ` · ${gpu.encoder_avg_latency_ms} ms` : ''
+      html += systemRow('NVENC sessions', `${gpu.encoder_sessions}${fpsText}${latencyText}`)
     }
     if (gpu.vram_used_mb != null && gpu.vram_total_mb) {
       const vramPercent = (gpu.vram_used_mb / gpu.vram_total_mb) * 100
@@ -274,6 +361,21 @@ function renderSystem(systemStats) {
     if (gpu.fan_rpm != null) html += systemRow('Fan', `${gpu.fan_rpm} RPM`)
     if (gpu.fan_pct != null) html += systemRow('Fan', `${gpu.fan_pct}%`)
     if (gpu.mem_busy_pct != null) html += systemRow('Mem busy', `${gpu.mem_busy_pct}%`)
+    if (gpu.vram_free_mb != null || gpu.vram_reserved_mb != null) {
+      html += systemRow('VRAM free / reserved', `${gpu.vram_free_mb ?? '—'} / ${gpu.vram_reserved_mb ?? '—'} MB`)
+    }
+    if (gpu.query_encoder_util_pct != null || gpu.query_decoder_util_pct != null) {
+      html += systemRow('NVML enc / dec', `${gpuPercent(gpu.query_encoder_util_pct)} / ${gpuPercent(gpu.query_decoder_util_pct)}`)
+    }
+    if (gpu.driver_version) html += systemRow('Driver', gpu.driver_version)
+    if (gpu.pstate || gpu.compute_mode) html += systemRow('State', `${gpu.pstate || '—'} / ${gpu.compute_mode || '—'}`)
+    if (gpu.pcie?.gen_current || gpu.pcie?.width_current) {
+      html += systemRow('PCIe', `Gen ${gpu.pcie.gen_current ?? '—'} x${gpu.pcie.width_current ?? '—'}`)
+    }
+    if (gpu.process_count != null) {
+      html += systemRow('GPU procs', `${gpu.process_count} · ${gpu.process_memory_mb ?? 0} MB`)
+    }
+    html += renderGpuProcesses(gpu)
     html += '</div>'
   }
 
@@ -336,20 +438,18 @@ function renderSystem(systemStats) {
   }
 
   // ── Top Processes ──
-  const procs = systemStats.top_processes || []
-  if (procs.length) {
+  const topCpuProcs = systemStats.top_processes || []
+  const topMemoryProcs = systemStats.top_memory_processes || []
+  if (topCpuProcs.length) {
     html += '<div class="sys-sec proc-sec" onclick="event.stopPropagation();openProcModal()" title="Click for full process list">'
-    html += '<div class="sys-ttl">Top Processes <span style="font-size:.55rem;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">↑ CPU · click for details</span></div>'
-    for (const p of procs) {
-      const cpuColor = p.cpu_pct > 50 ? 'err' : p.cpu_pct > 20 ? 'warn' : p.cpu_pct > 0 ? 'ok' : 'muted'
-      const cpuBar = `<div style="width:${Math.min(p.cpu_pct * 2, 100)}%;height:3px;background:var(--${cpuColor});border-radius:2px;margin-top:1px"></div>`
-      html += `<div class="proc-row">`
-      html += `<span class="proc-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>`
-      html += `<span class="proc-cpu" style="color:var(--${cpuColor})">${p.cpu_pct.toFixed(1)}%</span>`
-      html += `<span class="proc-mem">${p.mem_mb}M</span>`
-      html += `</div>`
-      html += cpuBar
-    }
+    html += '<div class="sys-ttl">Top CPU <span style="font-size:.55rem;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">per PID · click for details</span></div>'
+    html += renderProcessMiniList(topCpuProcs, 'cpu')
+    html += '</div>'
+  }
+  if (topMemoryProcs.length) {
+    html += '<div class="sys-sec proc-sec" onclick="event.stopPropagation();openProcModal()" title="Click for full process list">'
+    html += '<div class="sys-ttl">Top RAM <span style="font-size:.55rem;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">RSS by PID · click for details</span></div>'
+    html += renderProcessMiniList(topMemoryProcs, 'memory')
     html += '</div>'
   }
 
@@ -398,31 +498,35 @@ async function openProcModal() {
       return
     }
 
-    const maxCpu = Math.max(...procs.map((p) => p.cpu_pct), 0.1)
-    const maxMem = Math.max(...procs.map((p) => p.mem_pct), 0.1)
+    const maxCpu = Math.max(...procs.map((p) => p.cpu_pct || 0), 0.1)
+    const maxMem = Math.max(...procs.map((p) => p.mem_pct || 0), 0.1)
 
     let h = '<table class="proc-table">'
     h += '<thead><tr>'
-    h += '<th>Name</th><th>PID</th><th>CPU %</th><th>RAM %</th><th>RSS MB</th><th>User</th><th>Status</th><th>Command</th>'
+    h += '<th>Name</th><th>PID</th><th>CPU %</th><th>Host %</th><th>RAM %</th><th>RSS MB</th><th>User</th><th>Status</th><th>Command</th>'
     h += '</tr></thead><tbody>'
 
     for (const p of procs) {
-      const cpuColor = p.cpu_pct > 50 ? 'var(--err)' : p.cpu_pct > 20 ? 'var(--warn)' : p.cpu_pct > 0 ? 'var(--ok)' : 'var(--muted)'
-      const memColor = p.mem_pct > 20 ? 'var(--warn)' : p.mem_pct > 5 ? 'var(--accent2)' : 'var(--muted2)'
+      const cpuPct = p.cpu_pct || 0
+      const memPct = p.mem_pct || 0
+      const cpuColor = `var(--${processCpuColor(cpuPct)})`
+      const memColor = memPct > 20 ? 'var(--warn)' : memPct > 5 ? 'var(--accent2)' : 'var(--muted2)'
       const statusColor = p.status === 'running' ? 'var(--ok)' : p.status === 'sleeping' ? 'var(--muted)' : 'var(--warn)'
-      const cpuBarW = Math.min((p.cpu_pct / maxCpu) * 100, 100).toFixed(1)
-      const memBarW = Math.min((p.mem_pct / maxMem) * 100, 100).toFixed(1)
+      const cpuBarW = Math.min((cpuPct / maxCpu) * 100, 100).toFixed(1)
+      const memBarW = Math.min((memPct / maxMem) * 100, 100).toFixed(1)
+      const hostCpu = p.cpu_total_pct != null ? p.cpu_total_pct : 0
 
       h += '<tr>'
       h += `<td class="proc-name-cell" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>`
       h += `<td style="color:var(--muted);font-family:monospace;font-size:.65rem">${p.pid}</td>`
       h += `<td><div style="display:flex;align-items:center;gap:.4rem">
         <div class="proc-bar-wrap"><div class="proc-bar" style="width:${cpuBarW}%;background:${cpuColor}"></div></div>
-        <span style="color:${cpuColor};font-weight:700;font-family:monospace;min-width:4ch">${p.cpu_pct.toFixed(1)}</span>
+        <span style="color:${cpuColor};font-weight:700;font-family:monospace;min-width:4ch">${cpuPct.toFixed(1)}</span>
       </div></td>`
+      h += `<td style="color:var(--muted2);font-family:monospace">${hostCpu.toFixed(1)}</td>`
       h += `<td><div style="display:flex;align-items:center;gap:.4rem">
         <div class="proc-bar-wrap"><div class="proc-bar" style="width:${memBarW}%;background:${memColor}"></div></div>
-        <span style="color:${memColor};font-family:monospace;min-width:4ch">${p.mem_pct.toFixed(1)}</span>
+        <span style="color:${memColor};font-family:monospace;min-width:4ch">${memPct.toFixed(1)}</span>
       </div></td>`
       h += `<td style="color:var(--muted2);font-family:monospace">${p.mem_mb}</td>`
       h += `<td style="color:var(--muted);font-size:.62rem">${escapeHtml(p.user)}</td>`
@@ -853,6 +957,47 @@ function renderHistoryBar(history) {
   )
 }
 
+function formatStatsAge(meta) {
+  if (!meta?.updated_at) return ''
+  const updated = Date.parse(meta.updated_at)
+  if (!updated) return ''
+  const ageSec = Math.max(0, Math.round((Date.now() - updated) / 1000))
+  if (ageSec < 60) return ageSec + 's ago'
+  const ageMin = Math.round(ageSec / 60)
+  return ageMin + 'm ago'
+}
+
+function isStatsStale(serviceId) {
+  const meta = statsMetaData[serviceId]
+  if (!meta) return false
+  if (meta.stale || meta.ok === false) return true
+  if (!meta.updated_at) return false
+  const updated = Date.parse(meta.updated_at)
+  if (!updated) return false
+  const interval = Math.max(meta.interval || STATS_REFRESH_MS / 1000, 5)
+  return (Date.now() - updated) / 1000 > Math.max(interval * 3, 45)
+}
+
+function renderStatsFreshness(serviceId) {
+  const meta = statsMetaData[serviceId]
+  if (!meta) return ''
+  const age = formatStatsAge(meta)
+  if (isStatsStale(serviceId)) {
+    const reason = meta.error ? ` title="${escapeHtml(meta.error)}"` : ''
+    return `<span class="sbadge stale"${reason}>STALE</span>${age ? `<span class="age">${escapeHtml(age)}</span>` : ''}`
+  }
+  return age ? `<span class="age">${escapeHtml(age)}</span>` : ''
+}
+
+function renderStatsMetaText(serviceId) {
+  const meta = statsMetaData[serviceId]
+  if (!meta) return ''
+  const age = formatStatsAge(meta)
+  if (!age && !meta.error) return ''
+  const label = isStatsStale(serviceId) ? 'stats stale' : 'stats'
+  return `${label}${age ? ' ' + age : ''}${meta.error ? ': ' + meta.error : ''}`
+}
+
 // ── Header Overview ──
 function buildOverview() {
   const allServices = Object.values(statusData)
@@ -889,10 +1034,14 @@ function renderCard(serviceId, serviceData) {
   const serviceStats = statsData[serviceId] || {}
   const installed = serviceStats.version || serviceStats.addon_version || serviceStats.bazarr_version || ''
   const webUrl = WEB_URLS[serviceId] || ''
+  const statsFreshness = renderStatsFreshness(serviceId)
+  const statsMetaText = renderStatsMetaText(serviceId)
 
   if (serviceId === 'system') {
     return `<div class="card up" id="card-${serviceId}" onclick="openServiceModal('${serviceId}')" title="Click for details">
-    <div class="ct">&#x1F5A5; ${escapeHtml(current.name)}</div>${renderStats(serviceId, serviceStats)}</div>`
+    <div class="ct">&#x1F5A5; ${escapeHtml(current.name)}${statsFreshness}</div>${
+      statsMetaText ? `<div class="meta">${escapeHtml(statsMetaText)}</div>` : ''
+    }${renderStats(serviceId, serviceStats)}</div>`
   }
 
   const actionButtons = `<div class="card-acts">
@@ -910,18 +1059,24 @@ function renderCard(serviceId, serviceData) {
 
   return `<div class="card ${cssClass}" id="card-${serviceId}" onclick="openServiceModal('${serviceId}')" title="Click for details">
     ${actionButtons}
-    <div class="ct">${escapeHtml(current.name)}<span class="sbadge ${current.systemd_ok ? 'sys-up' : 'sys-dn'}" title="systemd: ${escapeHtml(current.systemd || 'unknown')}">SYS</span>${httpBadge}${latencyBadge}</div>
-    <div class="meta">${escapeHtml(current.message || '—')} · systemd: ${escapeHtml(current.systemd)}</div>
+    <div class="ct">${escapeHtml(current.name)}<span class="sbadge ${current.systemd_ok ? 'sys-up' : 'sys-dn'}" title="systemd: ${escapeHtml(current.systemd || 'unknown')}">SYS</span>${httpBadge}${statsFreshness}${latencyBadge}</div>
+    <div class="meta">${escapeHtml(current.message || '—')} · systemd: ${escapeHtml(current.systemd)}${statsMetaText ? ' · ' + escapeHtml(statsMetaText) : ''}</div>
     ${renderStats(serviceId, serviceStats)}${renderVersion(serviceId, installed)}
     <div class="bar">${renderHistoryBar(serviceData.history)}</div></div>`
 }
 
 // ── Data Fetch ──
+function cacheBust(url) {
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}_=${Date.now()}`
+}
+
 async function safeJson(url, opts = {}) {
   try {
+    const method = opts.method || 'GET'
     const response = await axios({
-      url,
-      method: opts.method || 'GET',
+      url: method === 'GET' && opts.cacheBust !== false ? cacheBust(url) : url,
+      method,
       headers: opts.headers,
       data: opts.body,
     })
@@ -931,22 +1086,65 @@ async function safeJson(url, opts = {}) {
   }
 }
 
-async function refresh() {
-  const [status, stats, versions] = await Promise.all([
-    safeJson('/api/status'),
-    safeJson('/api/stats'),
-    safeJson('/api/versions'),
-  ])
-  if (status) statusData = status
-  if (stats) statsData = stats
-  if (versions) versionsData = versions
+async function refreshStatus() {
+  const status = await safeJson('/api/status')
+  if (!status) return false
+  statusData = status
+  return true
+}
+
+async function refreshStats() {
+  const [stats, meta] = await Promise.all([safeJson('/api/stats'), safeJson('/api/stats/meta')])
+  let ok = false
+  if (stats) {
+    statsData = stats
+    lastStatsRefresh = Date.now()
+    ok = true
+  }
+  if (meta) {
+    statsMetaData = meta
+    ok = true
+  }
+  return ok
+}
+
+async function refreshSystemStats() {
+  const data = await safeJson('/api/stats/system')
+  if (!data?.stats) return false
+  statsData.system = data.stats
+  if (data.meta) {
+    statsMetaData.system = data.meta
+  } else if (data.updated_at) {
+    statsMetaData.system = {
+      ...(statsMetaData.system || {}),
+      ok: true,
+      stale: false,
+      updated_at: data.updated_at,
+      interval: STATUS_REFRESH_MS / 1000,
+    }
+  }
+  lastSystemStatsRefresh = Date.now()
+  return true
+}
+
+async function refreshVersions() {
+  const versions = await safeJson('/api/versions')
+  if (!versions) return false
+  versionsData = versions
+  lastVersionsRefresh = Date.now()
+  return true
+}
+
+function renderDashboard() {
   if (!Object.keys(statusData).length) return
 
   document.getElementById('overview').innerHTML = buildOverview()
+  const updated = lastSuccessfulRefresh ? new Date(lastSuccessfulRefresh) : new Date()
   document.getElementById('ts-hdr').textContent =
-    '⟳ ' + new Date().toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
+    '⟳ ' + updated.toLocaleTimeString('en-CA', { timeZone: TZ, hour12: false })
   document.getElementById('ts').textContent =
-    'Last updated: ' + new Date().toLocaleString('en-CA', { timeZone: TZ, hour12: false })
+    (lastSuccessfulRefresh ? 'Last updated: ' : 'Waiting for live data: ') +
+    updated.toLocaleString('en-CA', { timeZone: TZ, hour12: false })
 
   const categories = {}
   for (const [serviceId, serviceData] of Object.entries(statusData)) {
@@ -974,6 +1172,27 @@ async function refresh() {
     html += '</div>'
   }
   document.getElementById('cats').innerHTML = html
+}
+
+async function refresh() {
+  const now = Date.now()
+  const tasks = [refreshStatus()]
+
+  if (!statsData.system || now - lastSystemStatsRefresh >= STATUS_REFRESH_MS) {
+    tasks.push(refreshSystemStats())
+  }
+  if (!Object.keys(statsData).length || now - lastStatsRefresh >= STATS_REFRESH_MS) {
+    tasks.push(refreshStats())
+  }
+  if (!Object.keys(versionsData).length || now - lastVersionsRefresh >= VERSIONS_REFRESH_MS) {
+    tasks.push(refreshVersions())
+  }
+
+  const results = await Promise.all(tasks)
+  if (results.some(Boolean)) {
+    lastSuccessfulRefresh = Date.now()
+  }
+  renderDashboard()
 }
 
 // ── Logs ──
@@ -3309,4 +3528,4 @@ function buildAurTable(updates) {
 
 // ── Init ──
 refresh()
-setInterval(refresh, 30000)
+setInterval(refresh, STATUS_REFRESH_MS)

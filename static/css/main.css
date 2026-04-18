@@ -217,10 +217,19 @@ button.so:hover {
   background: var(--err-bg);
   color: var(--err);
 }
+.sbadge.stale {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
 .lat {
   font-size: 0.68rem;
   color: var(--muted);
   margin-left: auto;
+}
+.age {
+  font-size: 0.62rem;
+  color: var(--muted2);
+  font-weight: 400;
 }
 .meta {
   font-size: 0.72rem;
@@ -341,6 +350,64 @@ button.so:hover {
 }
 .sv.err {
   color: var(--err);
+}
+.gpu-procs {
+  margin-top: 0.45rem;
+  border-top: 1px solid #1a1f35;
+  padding-top: 0.35rem;
+  max-height: 240px;
+  overflow: auto;
+}
+.gpu-proc-head,
+.gpu-proc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.15rem 0.45rem;
+  align-items: baseline;
+}
+.gpu-proc-head {
+  color: var(--muted2);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.25rem;
+  text-transform: uppercase;
+}
+.gpu-proc {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #13172a;
+}
+.gpu-proc:last-child {
+  border-bottom: none;
+}
+.gpu-proc-name {
+  color: #dbe7ff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gpu-proc-pid,
+.gpu-proc-eng {
+  color: var(--muted2);
+  font-size: 0.58rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gpu-proc-mem {
+  color: var(--accent2);
+  font-family: monospace;
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+.gpu-proc-eng {
+  grid-column: 2;
+  max-width: 170px;
+  text-align: right;
 }
 .disk-item {
   padding: 0.2rem 0;
@@ -1385,6 +1452,17 @@ code {
   text-align: right;
   font-family: monospace;
   font-size: .62rem;
+}
+.proc-mini-bar {
+  height: 3px;
+  background: #1a1f35;
+  border-radius: 2px;
+  margin: 1px 0 3px;
+  overflow: hidden;
+}
+.proc-mini-bar > div {
+  height: 100%;
+  border-radius: 2px;
 }
 .proc-table {
   width: 100%;

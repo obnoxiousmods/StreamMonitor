@@ -62,10 +62,11 @@ Per-service API collectors running every 60 seconds:
 ### System Monitoring
 - **CPU** — model, cores, clock, usage with progress bar, load averages, temperatures (per-core via hwmon)
 - **Memory** — used/total with progress bar, swap
-- **GPU** — AMD Radeon via sysfs: usage, VRAM, temp, power, fan RPM, clocks
+- **GPU** — NVIDIA `nvidia-smi` full parse with device telemetry, encoder/decoder engines, per-process GPU memory and engine usage; AMD/Intel sysfs/fdinfo fallback
 - **Storage** — per-mount disk usage with colored bars
 - **Disk I/O** — read/write rates (whole-disk only, no partition double-counting)
 - **Network** — recv/sent rates with link speed utilization, session totals
+- **Processes** — top CPU and top RAM process lists with per-PID details
 
 ### Benchmark
 Compare self-hosted vs public instances across 39 test titles (movies, TV, anime):
@@ -106,6 +107,8 @@ git clone https://github.com/obnoxiousmods/StreamMonitor.git
 cd StreamMonitor
 cp .env.example .env  # Edit with your API keys and URLs
 uv sync
+npm ci
+npm run build
 uv run uvicorn app:app --host 127.0.0.1 --port 9090
 ```
 
@@ -179,7 +182,7 @@ SERVICES["myservice"] = {
 
 ```
 streammonitor/
-├── app.py                  # Starlette app, routes, Jinja2 rendering
+├── app.py                  # Starlette app, API routes, React SPA serving
 ├── main.py                 # Entry point (uvicorn)
 ├── core/                   # Core modules
 │   ├── config.py           # Service definitions, .env loading, API keys
@@ -197,10 +200,13 @@ streammonitor/
 ├── stats/                  # Background stats collection (60s)
 │   ├── collectors.py       # 19 per-service API collectors
 │   ├── system.py           # CPU, RAM, disk, GPU, network, temps
+│   ├── gpu_nvidia.py       # Full nvidia-smi device/process parser
+│   ├── process_metrics.py  # Shared top CPU/RAM process sampling
 │   ├── github.py           # GitHub release version fetcher (6h)
 │   └── base.py             # Shared httpx helpers
-├── templates/              # Jinja2 HTML templates
-├── static/                 # CSS + JS (ESLint, Prettier, Stylelint)
+├── frontend/               # Vite + React + TypeScript dashboard source
+├── static/app/             # Built React bundle served by Starlette
+├── static/                 # Static runtime assets and legacy JS/CSS
 └── .env                    # Configuration (gitignored)
 ```
 

@@ -11,6 +11,9 @@ import subprocess
 import time
 from pathlib import Path
 
+from stats.gpu_nvidia import collect_nvidia_gpu
+from stats.process_metrics import collect_process_lists
+
 try:
     import psutil
 
@@ -163,77 +166,100 @@ def _fmt_rate(bps: float) -> str:
     return f"{bps / 1024**3:.2f} GB/s"
 
 
-def _collect_gpu_nvidia() -> dict | None:
-    """Collect NVIDIA GPU stats via nvidia-smi."""
-    fields = (
-        "name,utilization.gpu,utilization.memory,"
-        "memory.total,memory.used,"
-        "temperature.gpu,power.draw,"
-        "clocks.current.graphics,clocks.current.memory,fan.speed,"
-        "encoder.stats.sessionCount,encoder.stats.averageFps,encoder.stats.averageLatency,"
-        "utilization.encoder,utilization.decoder"
-    )
+def _gib(value: int | float) -> float:
+    return round(value / 1024**3, 1)
+
+
+def _collect_swap() -> dict | None:
+    """Read swap directly from kernel meminfo.
+
+    SwapCached is still allocated in swap, but the page is also resident in RAM.
+    Exposing both allocated and active swap makes the dashboard match the
+    different conventions used by tools like free, htop, and btop.
+    """
     try:
-        r = subprocess.run(
-            ["nvidia-smi", f"--query-gpu={fields}", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode != 0:
+        meminfo: dict[str, int] = {}
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            key, raw = line.split(":", 1)
+            parts = raw.strip().split()
+            if parts and parts[0].isdigit():
+                meminfo[key] = int(parts[0]) * 1024
+
+        total = meminfo.get("SwapTotal", 0)
+        if total <= 0:
             return None
-        parts = [p.strip() for p in r.stdout.strip().split(",")]
-        if len(parts) < 10:
-            return None
 
-        def _float(v: str) -> float | None:
-            try:
-                return float(v)
-            except (ValueError, TypeError):
-                return None
+        free = meminfo.get("SwapFree", 0)
+        cached = meminfo.get("SwapCached", 0)
+        used = max(0, total - free)
+        active = max(0, used - cached)
 
-        gpu: dict = {"name": parts[0]}
-        if (v := _float(parts[1])) is not None:
-            gpu["usage_pct"] = int(v)
-        if (v := _float(parts[2])) is not None:
-            gpu["mem_busy_pct"] = int(v)
-        if (vt := _float(parts[3])) is not None and (vu := _float(parts[4])) is not None:
-            gpu["vram_total_mb"] = int(vt)
-            gpu["vram_used_mb"]  = int(vu)
-        if (v := _float(parts[5])) is not None:
-            gpu["temp_c"] = int(v)
-        if (v := _float(parts[6])) is not None:
-            gpu["power_w"] = round(v)
-        if (v := _float(parts[7])) is not None:
-            gpu["core_mhz"] = int(v)
-        if (v := _float(parts[8])) is not None:
-            gpu["mem_mhz"] = int(v)
-        if (v := _float(parts[9])) is not None:
-            gpu["fan_pct"] = int(v)
-
-        # Encoder/decoder engine utilization (indices 10-14)
-        if len(parts) >= 15:
-            engines: dict[str, int] = {}
-            enc_sessions = _float(parts[10])
-            enc_util = _float(parts[13]) if len(parts) > 13 else None
-            dec_util = _float(parts[14]) if len(parts) > 14 else None
-            if enc_util is not None and enc_util > 0:
-                engines["enc"] = int(enc_util)
-            elif enc_sessions and enc_sessions > 0:
-                enc_fps = _float(parts[11])
-                engines["enc"] = min(round((enc_fps or 0) * 2), 100)
-            if dec_util is not None and dec_util > 0:
-                engines["dec"] = int(dec_util)
-            if engines:
-                gpu["engines"] = engines
-
-        # Fall back to fdinfo if available (NVIDIA open kernel module >= 495)
-        if not gpu.get("engines"):
-            fdinfo = _get_gpu_fdinfo_usage()
-            if fdinfo:
-                gpu["engines"] = fdinfo
-
-        return gpu
+        return {
+            "total_gb": _gib(total),
+            "used_gb": _gib(used),
+            "active_gb": _gib(active),
+            "cached_gb": _gib(cached),
+            "free_gb": _gib(free),
+            "percent": round((used / total) * 100, 1),
+            "active_percent": round((active / total) * 100, 1),
+        }
     except Exception:
         return None
+
+
+def _nvidia_float(value: str) -> float | None:
+    value = value.strip()
+    if not value or value in {"-", "N/A", "[Not Supported]"}:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _collect_nvidia_dmon_util(index: int = 0) -> dict[str, int]:
+    """Sample NVIDIA engine busy percentages from dmon."""
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", "dmon", "-s", "u", "-c", "2", "-i", str(index)],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        if r.returncode != 0:
+            return {}
+
+        samples: list[dict[str, int]] = []
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 7:
+                continue
+            try:
+                gpu_index = int(parts[0])
+            except ValueError:
+                continue
+            if gpu_index != index:
+                continue
+
+            values = {
+                "enc": _nvidia_float(parts[3]),
+                "dec": _nvidia_float(parts[4]),
+                "jpg": _nvidia_float(parts[5]),
+                "ofa": _nvidia_float(parts[6]),
+            }
+            samples.append({key: int(value) for key, value in values.items() if value is not None})
+
+        return samples[-1] if samples else {}
+    except Exception:
+        return {}
+
+
+def _collect_gpu_nvidia() -> dict | None:
+    """Collect NVIDIA GPU stats via the full nvidia-smi parser."""
+    return collect_nvidia_gpu()
 
 
 def _collect_gpu_amd(card_path: str) -> dict | None:
@@ -430,13 +456,21 @@ def _collect_system_sync() -> dict:
 
         # ── Swap ──
         try:
-            swap = psutil.swap_memory()
-            if swap.total > 0:
-                result["swap"] = {
-                    "total_gb": round(swap.total / 1024**3, 1),
-                    "used_gb": round(swap.used / 1024**3, 1),
-                    "percent": swap.percent,
-                }
+            swap_info = _collect_swap()
+            if swap_info is None:
+                swap = psutil.swap_memory()
+                if swap.total > 0:
+                    swap_info = {
+                        "total_gb": _gib(swap.total),
+                        "used_gb": _gib(swap.used),
+                        "active_gb": _gib(swap.used),
+                        "cached_gb": 0,
+                        "free_gb": _gib(swap.free),
+                        "percent": swap.percent,
+                        "active_percent": swap.percent,
+                    }
+            if swap_info:
+                result["swap"] = swap_info
         except Exception:
             pass
 
@@ -559,36 +593,13 @@ def _collect_system_sync() -> dict:
         except Exception:
             pass
 
-        # ── Top processes by CPU (deduped by name) ──
+        # ── Top processes by CPU and RAM ──
         try:
-            cpu_count = psutil.cpu_count(logical=True) or 1
-            raw: list[dict] = []
-            attrs = ["pid", "name", "cpu_percent", "memory_percent", "memory_info", "status", "username"]
-            for p in psutil.process_iter(attrs):
-                with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    raw.append(p.info)
-            raw.sort(key=lambda x: x.get("cpu_percent") or 0.0, reverse=True)
-            seen_names: set[str] = set()
-            top_procs: list[dict] = []
-            for info in raw:
-                name = info.get("name") or "unknown"
-                if name in seen_names:
-                    continue
-                seen_names.add(name)
-                mem_info = info.get("memory_info")
-                top_procs.append({
-                    "pid": info.get("pid"),
-                    "name": name,
-                    "cpu_pct": round((info.get("cpu_percent") or 0.0) / cpu_count, 1),
-                    "mem_pct": round(info.get("memory_percent") or 0.0, 1),
-                    "mem_mb": round(mem_info.rss / 1024**2, 1) if mem_info else 0,
-                    "status": info.get("status", ""),
-                    "user": ((info.get("username") or "").split("\\")[-1])[:14],
-                })
-                if len(top_procs) >= 5:
-                    break
-            if top_procs:
-                result["top_processes"] = top_procs
+            proc_lists = collect_process_lists(cpu_limit=10, memory_limit=10, process_limit=30)
+            if proc_lists["top_cpu"]:
+                result["top_processes"] = proc_lists["top_cpu"]
+            if proc_lists["top_memory"]:
+                result["top_memory_processes"] = proc_lists["top_memory"]
         except Exception:
             pass
 

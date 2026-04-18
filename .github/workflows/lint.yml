@@ -39,11 +39,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: ESLint
-        run: npx eslint static/js/
+      - name: Frontend lint
+        run: npm run lint
 
-      - name: Stylelint
-        run: npx stylelint "static/css/*.css"
-
-      - name: Prettier check
-        run: npx prettier --check static/js/ static/css/
+      - name: Frontend build
+        run: npm run build

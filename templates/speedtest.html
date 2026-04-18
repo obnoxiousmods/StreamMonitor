@@ -7,7 +7,7 @@
     <meta name="description" content="Download speed test via direct and Cloudflare endpoints" />
     <meta name="robots" content="noindex,nofollow" />
     <meta name="theme-color" content="#0a0c14" />
-    <link rel="stylesheet" href="/static/css/speedtest.css" />
+    <link rel="stylesheet" href="/static/css/speedtest.css?v={{ static_version }}" />
   </head>
   <body>
     <div class="container">
@@ -62,7 +62,7 @@
       const SPEEDTEST_CF_URL = {{ speedtest_cf_url|tojson }};
       const SPEEDTEST_CF_NAME = {{ speedtest_cf_name|tojson }};
     </script>
-    <script src="/static/js/axios.min.js"></script>
-    <script src="/static/js/speedtest.js"></script>
+    <script src="/static/js/axios.min.js?v={{ static_version }}"></script>
+    <script src="/static/js/speedtest.js?v={{ static_version }}"></script>
   </body>
 </html>

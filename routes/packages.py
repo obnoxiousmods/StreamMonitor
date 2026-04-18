@@ -9,6 +9,8 @@ import time
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from core.process import CommandTimeoutError, run_command
+
 logger = logging.getLogger(__name__)
 
 # ── Cache ─────────────────────────────────────────────────────────────────────
@@ -30,14 +32,9 @@ def _parse_update_line(line: str) -> dict | None:
 
 async def _run(cmd: list[str], timeout: float = 60) -> str:
     try:
-        p = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(p.communicate(), timeout=timeout)
-        return out.decode(errors="replace")
-    except TimeoutError:
+        result = await run_command(cmd, timeout=timeout)
+        return result.stdout
+    except CommandTimeoutError:
         logger.warning("packages: command timed out: %s", cmd)
         return ""
     except Exception as e:
