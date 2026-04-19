@@ -23,6 +23,13 @@ import * as SelectPrimitive from '@radix-ui/react-select'
 import { useMemo, useState } from 'react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  AioStreamsAnalyzer,
+  AioTestSuite,
+  JellyfinPage,
+  MediaFusionMetrics,
+  MediaFusionScraperAnalyzer,
+} from './features/diagnosticPanels'
 
 type AnyRecord = Record<string, unknown>
 
@@ -1184,18 +1191,10 @@ function ServiceModal({
       )}
       {tab === 'logs' && <LogViewer unit={unit} />}
       {tab === 'controls' && <ServiceControls unit={unit} notify={notify} />}
-      {tab === 'analyzer' && (
-        <Analyzer endpoint="/api/aiostreams/analyze" logUnit="aiostreams" title="AIOStreams analyzer" />
-      )}
+      {tab === 'analyzer' && <AioStreamsAnalyzer />}
       {tab === 'tests' && <AioTestSuite />}
-      {tab === 'metrics' && <Analyzer endpoint="/api/mediafusion/metrics" title="MediaFusion metrics" />}
-      {tab === 'scraper' && (
-        <Analyzer
-          endpoint="/api/mediafusion/analyze"
-          logUnit="mediafusion-taskiq-scrapy"
-          title="MediaFusion scraper analyzer"
-        />
-      )}
+      {tab === 'metrics' && <MediaFusionMetrics />}
+      {tab === 'scraper' && <MediaFusionScraperAnalyzer />}
     </Modal>
   )
 }
@@ -1605,20 +1604,6 @@ function EditableRegistry({
   )
 }
 
-function JellyfinPage() {
-  const jellyfin = useQuery({
-    queryKey: ['jellyfin'],
-    queryFn: () => api<AnyRecord>('/api/jellyfin'),
-    refetchInterval: 30000,
-  })
-  return (
-    <div className="grid gap-3 lg:grid-cols-2">
-      <JsonPanel title="Active sessions" data={jellyfin.data?.sessions || []} />
-      <JsonPanel title="Recent activity" data={jellyfin.data?.activity || []} />
-    </div>
-  )
-}
-
 function SpeedTestCard({ config, compact }: { config: SpeedConfig; compact?: boolean }) {
   const [size, setSize] = useState('25')
   const [results, setResults] = useState<Array<{ name: string; mbps: number; seconds: number }>>([])
@@ -1808,75 +1793,6 @@ function PackagesPage() {
         }
       />
     </Card>
-  )
-}
-
-function Analyzer({ endpoint, logUnit, title }: { endpoint: string; logUnit?: string; title: string }) {
-  const [lines, setLines] = useState('5000')
-  const [data, setData] = useState<unknown>(null)
-  async function load() {
-    setData(await api(`${endpoint}${endpoint.includes('?') ? '&' : '?'}n=${lines}`))
-  }
-  async function raw() {
-    if (!logUnit) return
-    setData(await api(`/api/logs/${encodeURIComponent(logUnit)}?n=${lines}`))
-  }
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-        <Dropdown
-          className="w-full sm:w-auto"
-          value={lines}
-          onChange={setLines}
-          options={['1000', '2000', '5000', '10000', '25000', '50000'].map((value) => ({
-            value,
-            label: `${value} lines`,
-          }))}
-          ariaLabel="Analyzer line count"
-        />
-        <Button onClick={() => void load()}>Analyze</Button>
-        {logUnit && (
-          <Button variant="ghost" onClick={() => void raw()}>
-            Raw logs
-          </Button>
-        )}
-      </div>
-      <JsonPanel title={title} data={data || { status: 'Click Analyze' }} />
-    </div>
-  )
-}
-
-function AioTestSuite() {
-  const [imdb, setImdb] = useState('tt0468569')
-  const [type, setType] = useState('movie')
-  const [results, setResults] = useState<unknown[]>([])
-  async function run() {
-    const data = await api('/api/aiostreams/test', { method: 'POST', body: JSON.stringify({ imdb, type }) })
-    setResults([data, ...results])
-  }
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
-        <Dropdown
-          className="w-full sm:w-auto"
-          value={type}
-          onChange={setType}
-          options={[
-            { value: 'movie', label: 'Movie' },
-            { value: 'series', label: 'Series' },
-          ]}
-          ariaLabel="AIOStreams test type"
-        />
-        <Input
-          className="w-full sm:w-80"
-          value={imdb}
-          onChange={(event) => setImdb(event.target.value)}
-          placeholder="tt0468569 or tt0903747:3:7"
-        />
-        <Button onClick={() => void run()}>Run test</Button>
-      </div>
-      <JsonPanel title="Test results" data={results} />
-    </div>
   )
 }
 
