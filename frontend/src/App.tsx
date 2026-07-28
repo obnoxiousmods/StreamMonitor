@@ -1087,8 +1087,20 @@ function DashboardApp({
 }) {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState(() => tabFromPath(window.location.pathname))
-  const [selectedService, setSelectedService] = useState<string | null>(null)
+  const [selectedService, setSelectedServiceState] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('service'),
+  )
   const [processModal, setProcessModal] = useState(false)
+
+  // Service detail modal is deep-linkable/shareable via ?service=<id> — set without
+  // adding a history entry (opening/closing a modal shouldn't spam back/forward).
+  function setSelectedService(id: string | null) {
+    setSelectedServiceState(id)
+    const url = new URL(window.location.href)
+    if (id) url.searchParams.set('service', id)
+    else url.searchParams.delete('service')
+    window.history.replaceState(null, '', url.pathname + url.search)
+  }
   const bootstrap = useQuery({ queryKey: ['bootstrap'], queryFn: () => api<Bootstrap>('/api/bootstrap') })
   const status = useQuery({
     queryKey: ['status'],
