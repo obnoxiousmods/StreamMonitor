@@ -372,6 +372,14 @@ SERVICES: dict[str, dict] = {
         "ok": [200],
         "category": "indexers",
     },
+    "prowlarr": {
+        "name": "Prowlarr",
+        "unit": _unit("PROWLARR_UNIT", "prowlarr"),
+        "url": f"{PROWLARR_URL}/api/v1/system/status",
+        "ok": [200],
+        "headers": {"X-Api-Key": PROWLARR_KEY},
+        "category": "indexers",
+    },
     "byparr": {
         "name": "Byparr",
         "unit": _unit("BYPARR_UNIT", "byparr"),
