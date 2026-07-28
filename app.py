@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import secrets
@@ -22,15 +23,26 @@ from starlette.datastructures import MutableHeaders
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from starlette.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+import core.broadcast as _broadcast
 import core.config as cfg
+import core.db as _db
 import core.errors as _errors
 import core.health as _health
 import core.logging_config  # noqa: F401 — side-effect import
 import core.perms as _perms
+import routes.metrics as _metrics
 import stats as _stats
 from core.process import CommandTimeoutError, run_command
 from routes.aiostreams import api_aiostreams_analyze, api_aiostreams_test
@@ -39,6 +51,7 @@ from routes.benchmark import api_benchmark
 from routes.dmesg import api_dmesg
 from routes.jellyfin import api_jellyfin
 from routes.mediafusion import api_mediafusion_analyze, api_mediafusion_metrics
+from routes.metrics import api_alerts, api_incidents, api_metric_series, api_service_latency
 from routes.packages import api_packages
 from routes.processes import api_processes
 from routes.public import api_public
@@ -102,10 +115,43 @@ def _static_version() -> str:
 STATIC_VERSION = _static_version()
 
 # ── Auth config ────────────────────────────────────────────────────────────────
-SECRET_KEY = os.environ.get("MONITOR_SECRET", secrets.token_hex(32))
 ph = PasswordHasher()
 
 _HASH_FILE = cfg._KEY_FILE.parent / "monitor_pw_hash.txt"
+_CONFIG_FILE = cfg._KEY_FILE.parent / "config.json"
+
+
+def _load_config() -> dict:
+    try:
+        if _CONFIG_FILE.exists():
+            return json.loads(_CONFIG_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_config(updates: dict) -> None:
+    _CONFIG_FILE.parent.mkdir(exist_ok=True)
+    current = _load_config()
+    current.update(updates)
+    _CONFIG_FILE.write_text(json.dumps(current, indent=2))
+
+
+def _load_secret() -> str:
+    # Environment variable always wins for ephemeral / container use.
+    env_secret = os.environ.get("MONITOR_SECRET", "").strip()
+    if env_secret:
+        return env_secret
+    # Persisted secret keeps sessions valid across restarts.
+    current = _load_config()
+    secret = current.get("secret_key", "").strip()
+    if not secret:
+        secret = secrets.token_hex(32)
+        _save_config({"secret_key": secret})
+    return secret
+
+
+SECRET_KEY = _load_secret()
 
 
 def _load_hash() -> str:
@@ -129,15 +175,19 @@ def _save_hash(new_hash: str) -> None:
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app):
+    await _db.init_pool()
     task_poll = asyncio.create_task(_health.poll_loop())
     task_stats = asyncio.create_task(_stats.stats_loop())
     task_errors = asyncio.create_task(_errors.error_scan_loop())
+    task_retention = asyncio.create_task(_db.retention_loop())
     yield
     task_poll.cancel()
     task_stats.cancel()
     task_errors.cancel()
+    task_retention.cancel()
     with contextlib.suppress(Exception):
-        await asyncio.gather(task_poll, task_stats, task_errors, return_exceptions=True)
+        await asyncio.gather(task_poll, task_stats, task_errors, task_retention, return_exceptions=True)
+    await _db.close_pool()
 
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -150,7 +200,7 @@ def check_pw(username: str, password: str) -> bool:
         return False
     try:
         return ph.verify(ADMIN_HASH[0], password)
-    except VerifyMismatchError, Exception:
+    except (VerifyMismatchError, Exception):
         return False
 
 
@@ -179,12 +229,13 @@ def _spa_response() -> FileResponse | HTMLResponse:
 
 def _public_config() -> dict:
     return {
+        "categories": cfg.CATEGORIES,
         "speedtest": {
             "direct_url": cfg.SPEEDTEST_DIRECT_URL,
             "direct_name": cfg.SPEEDTEST_DIRECT_NAME,
             "cf_url": cfg.SPEEDTEST_CF_URL,
             "cf_name": cfg.SPEEDTEST_CF_NAME,
-        }
+        },
     }
 
 
@@ -210,6 +261,7 @@ def _bootstrap_config() -> dict:
             for sid, svc in cfg.SERVICES.items()
             if svc.get("unit")
         ],
+        "metric_keys": sorted(_metrics.KNOWN_METRIC_KEYS),
     }
 
 
@@ -310,12 +362,40 @@ async def dashboard(request: Request):
 
 
 @require_auth
-async def speedtest_spa(request: Request):
+async def dashboard_tab_spa(request: Request):
     return _spa_response()
 
 
 async def ping(request: Request):
     return JSONResponse({"ok": True, "ts": datetime.now(UTC).isoformat()})
+
+
+@require_auth
+async def api_stream(request: Request):
+    """Server-Sent Events: pushes {type: 'status', data: <health result>} on every
+    service poll and {type: 'stats', data: {service_id, updated_at}} whenever a stats
+    collector finishes a run. The frontend uses these as fast-path cache updates /
+    refetch triggers; REST polling stays as a fallback so a dropped SSE connection
+    never leaves the UI stale for long.
+    """
+
+    async def event_gen():
+        yield ": connected\n\n"
+        async for payload in _broadcast.subscribe():
+            if payload is None:
+                yield ": heartbeat\n\n"
+            else:
+                yield f"data: {payload}\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 async def api_public_config(request: Request):
@@ -426,7 +506,7 @@ async def api_logs(request: Request):
         return JSONResponse({"error": "not allowed"}, status_code=403)
     try:
         n = str(min(int(request.query_params.get("n", "200")), 1000))
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         n = "200"
     try:
         result = await run_command(
@@ -534,16 +614,21 @@ async def api_errors(request: Request):
             "scan_count": _errors.scan_count,
             "total_errors": sum(1 for e in errs if e.get("severity") == "error"),
             "total_warnings": sum(1 for e in errs if e.get("severity") == "warning"),
+            "scan": _errors.scan_status(),
         }
     )
 
 
 @require_auth
 async def api_errors_scan(request: Request):
+    status = _errors.scan_status()
+    if status["running"]:
+        result = await _errors.scan_all()
+        return JSONResponse(result)
     task = asyncio.create_task(_errors.scan_all())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "started": True, "skipped": False, "scan": _errors.scan_status()}, status_code=202)
 
 
 async def api_settings_keys(request: Request):
@@ -633,6 +718,7 @@ app = Starlette(
         Route("/logout", logout),
         Route("/", dashboard),
         Route("/api/ping", ping),
+        Route("/api/stream", api_stream),
         Route("/api/public-config", api_public_config),
         Route("/api/bootstrap", api_bootstrap),
         Route("/api/auth/session", api_auth_session),
@@ -662,9 +748,24 @@ app = Starlette(
         Route("/api/aiostreams/test", require_auth(api_aiostreams_test), methods=["POST"]),
         Route("/api/mediafusion/metrics", require_auth(api_mediafusion_metrics)),
         Route("/api/mediafusion/analyze", require_auth(api_mediafusion_analyze)),
+        Route("/api/alerts", require_auth(api_alerts)),
+        Route("/api/metrics/incidents", require_auth(api_incidents)),
+        Route("/api/metrics/service/{service_id}", require_auth(api_service_latency)),
+        Route("/api/metrics/{metric_key}", require_auth(api_metric_series)),
         Route("/api/public", api_public),
-        Route("/speedtest", speedtest_spa),
+        Route("/speedtest", dashboard_tab_spa),
         Route("/speedtest/download", speedtest_download),
+        # Dashboard tabs get their own URL so refresh/back-forward/bookmarks work —
+        # all serve the same SPA shell; the client reads the path to pick the tab.
+        Route("/processes", dashboard_tab_spa),
+        Route("/logs", dashboard_tab_spa),
+        Route("/perms", dashboard_tab_spa),
+        Route("/errors", dashboard_tab_spa),
+        Route("/settings", dashboard_tab_spa),
+        Route("/jellyfin", dashboard_tab_spa),
+        Route("/benchmark", dashboard_tab_spa),
+        Route("/api-explorer", dashboard_tab_spa),
+        Route("/packages", dashboard_tab_spa),
         Mount("/static", StaticFiles(directory=str(_BASE_DIR / "static")), name="static"),
     ],
     middleware=[

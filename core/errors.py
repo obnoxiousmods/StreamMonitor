@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import re
 import time
 from collections import deque
@@ -20,12 +21,31 @@ from core.process import run_command
 
 logger = logging.getLogger(__name__)
 
-SCAN_INTERVAL = 120  # seconds between scans
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+SCAN_INTERVAL = _env_int("STREAMMONITOR_ERROR_SCAN_INTERVAL", 300)  # seconds between scans
+SCAN_CONCURRENCY = _env_int("STREAMMONITOR_ERROR_SCAN_CONCURRENCY", 4)
+JOURNAL_LINES = _env_int("STREAMMONITOR_ERROR_SCAN_LINES", 1500)
 MAX_ERRORS = 2000  # rolling history cap
 
 error_history: deque[dict] = deque(maxlen=MAX_ERRORS)
 last_scan_ts: float = 0.0
 scan_count: int = 0
+last_scan_started_ts: float = 0.0
+last_scan_finished_ts: float = 0.0
+last_scan_duration_ms: int | None = None
+last_scan_new_count: int = 0
+last_scan_checked_units: int = 0
+last_scan_failed_units: int = 0
+last_scan_error: str | None = None
+skipped_scan_count: int = 0
+_scan_lock: asyncio.Lock | None = None
 
 # ── Noise suppression: lines we always skip ────────────────────────────────────
 _GLOBAL_SKIP = re.compile(
@@ -219,7 +239,13 @@ def _classify_stremthru(line: str) -> tuple[str, str] | None:
 
 
 def _classify_aiostreams(line: str) -> tuple[str, str] | None:
-    """AIOStreams (pnpm): 🔴 | ERROR | ... or 🟡 | WARN | ..."""
+    """AIOStreams. New pino format `[HH:MM:SS.mmm] LEVEL: msg`; legacy 🔴|ERROR|…"""
+    # New pino pretty format (the pino header survives the journalctl prefix).
+    if re.search(r"\]\s+(?:ERROR|FATAL):", line):
+        return "error", "aiostreams"
+    if re.search(r"\]\s+WARN(?:ING)?:", line):
+        return "warning", "aiostreams"
+    # Legacy emoji/pipe format
     if re.search(r"🔴|🚨|\|\s*ERROR\s*\||\|\s*FATAL\s*\|", line):
         return "error", "aiostreams"
     if re.search(r"🟡|\|\s*WARN(ING)?\s*\|", line):
@@ -353,74 +379,95 @@ async def _scan_plex_files(since: float) -> list[dict]:
 
 
 # ── Journal scan per unit ──────────────────────────────────────────────────────
+
+# journalctl --output=short-iso prefixes every physical line with
+# "2026-07-18T11:24:15-07:00 lucy corepack[1712]: ". Strip it so continuation
+# detection can see the app's own indentation (pino key/value lines, stack
+# frames), which the prefix would otherwise mask.
+_RE_JOURNAL_PREFIX = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+\-]\d{2}:?\d{2}\s+\S+\s+[^:]*:\s?(.*)$"
+)
+
+
+def _log_payload(raw: str) -> str:
+    """Return the application log text with the journalctl prefix removed."""
+    m = _RE_JOURNAL_PREFIX.match(raw)
+    return m.group(1) if m else raw
+
+
 async def _scan_unit(sid: str, unit: str, since: str) -> list[dict]:
     found: list[dict] = []
-    try:
-        result = await run_command(
-            [
-                "sudo",
-                "journalctl",
-                "-u",
-                unit,
-                "--since",
-                since,
-                "--no-pager",
-                "--output=short-iso",
-                # No -p filter: many apps log everything at INFO journald priority
-                # but embed their own level in the message (Comet, AIOStreams, etc.)
-                # Limit lines to avoid overwhelming the scanner
-                "-n",
-                "2000",
-            ],
-            timeout=20,
+    result = await run_command(
+        [
+            "sudo",
+            "journalctl",
+            "-u",
+            unit,
+            "--since",
+            since,
+            "--no-pager",
+            "--output=short-iso",
+            # No -p filter: many apps log everything at INFO journald priority
+            # but embed their own level in the message (Comet, AIOStreams, etc.)
+            # Limit lines to avoid overwhelming the scanner.
+            "-n",
+            str(JOURNAL_LINES),
+        ],
+        timeout=20,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip()[:300] or f"journalctl exited {result.returncode}")
+
+    lines = result.stdout.splitlines()
+    i = 0
+    while i < len(lines):
+        raw_line = lines[i]
+        line = raw_line.strip()
+        i += 1
+        if not line or _SKIP_JOURNAL_NOISE.search(line):
+            continue
+        if _GLOBAL_SKIP.search(line):
+            continue
+        result = _classify_line(sid, line)
+        if result is None:
+            continue
+        sev, _ = result
+        # Capture up to 5 continuation lines (stack frames, etc.)
+        context_parts = [line]
+        while i < len(lines) and len(context_parts) < 6:
+            nxt_raw = lines[i]
+            nxt_payload = _log_payload(nxt_raw)
+            nxt = nxt_payload.strip()
+            if not nxt:
+                break
+            # If next line looks like a continuation (stack frame, indented, JSON fragment).
+            # Indentation is checked on the payload (prefix stripped), so pino
+            # key/value continuation lines are captured under journalctl short-iso.
+            if (
+                nxt_payload.startswith("   ")
+                or nxt_payload.startswith("\t")
+                or nxt.startswith("at ")
+                or "at Jackett." in nxt
+                or "at Radarr." in nxt
+                or "at Sonarr." in nxt
+                or nxt.startswith("null,")
+                or nxt.startswith("}")
+            ):
+                context_parts.append(nxt)
+                i += 1
+            else:
+                break
+        full_line = " ↵ ".join(context_parts)[:600]
+        entry_ts = _extract_ts(line, time.time())
+        found.append(
+            {
+                "sid": sid,
+                "unit": unit,
+                "line": full_line,
+                "severity": sev,
+                "ts": entry_ts,
+            }
         )
-        lines = result.stdout.splitlines()
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            i += 1
-            if not line or _SKIP_JOURNAL_NOISE.search(line):
-                continue
-            if _GLOBAL_SKIP.search(line):
-                continue
-            result = _classify_line(sid, line)
-            if result is None:
-                continue
-            sev, _ = result
-            # Capture up to 5 continuation lines (stack frames, etc.)
-            context_parts = [line]
-            while i < len(lines) and len(context_parts) < 6:
-                nxt = lines[i].strip()
-                if not nxt:
-                    break
-                # If next line looks like a continuation (stack frame, indented, JSON fragment)
-                if (
-                    nxt.startswith("   ")
-                    or nxt.startswith("\t")
-                    or nxt.startswith("at ")
-                    or "at Jackett." in nxt
-                    or "at Radarr." in nxt
-                    or "at Sonarr." in nxt
-                    or nxt.startswith("null,")
-                    or nxt.startswith("}")
-                ):
-                    context_parts.append(nxt)
-                    i += 1
-                else:
-                    break
-            full_line = " ↵ ".join(context_parts)[:600]
-            entry_ts = _extract_ts(line, time.time())
-            found.append(
-                {
-                    "sid": sid,
-                    "unit": unit,
-                    "line": full_line,
-                    "severity": sev,
-                    "ts": entry_ts,
-                }
-            )
-    except Exception:
-        pass
     return found
 
 
@@ -441,62 +488,140 @@ def _dedup_key(sid: str, line: str) -> str:
     return f"{sid}|{core[:140]}"
 
 
-async def scan_all() -> int:
-    global last_scan_ts, scan_count
+def _get_scan_lock() -> asyncio.Lock:
+    global _scan_lock
+    if _scan_lock is None:
+        _scan_lock = asyncio.Lock()
+    return _scan_lock
 
-    if last_scan_ts:
-        since_dt = datetime.fromtimestamp(last_scan_ts - 10, UTC)
-        since_str = since_dt.strftime("%Y-%m-%d %H:%M:%S")
-        since_ts = last_scan_ts - 10
-    else:
-        since_str = "30 minutes ago"
-        since_ts = time.time() - 1800
 
-    scan_time = time.time()
+def scan_status() -> dict:
+    lock = _get_scan_lock()
+    return {
+        "running": lock.locked(),
+        "last_scan": last_scan_ts or None,
+        "last_started": last_scan_started_ts or None,
+        "last_finished": last_scan_finished_ts or None,
+        "last_duration_ms": last_scan_duration_ms,
+        "last_new": last_scan_new_count,
+        "scan_count": scan_count,
+        "skipped_scan_count": skipped_scan_count,
+        "checked_units": last_scan_checked_units,
+        "failed_units": last_scan_failed_units,
+        "last_error": last_scan_error,
+        "interval_seconds": SCAN_INTERVAL,
+        "journal_lines": JOURNAL_LINES,
+        "concurrency": SCAN_CONCURRENCY,
+    }
 
-    tasks = []
-    sids = []
-    for sid, svc in cfg.SERVICES.items():
-        unit = svc.get("unit")
-        if unit and sid != "plex":
-            tasks.append(_scan_unit(sid, unit, since_str))
-            sids.append(sid)
-    tasks.append(_scan_plex_files(since_ts))
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+async def scan_all() -> dict:
+    global last_scan_ts, scan_count, last_scan_started_ts, last_scan_finished_ts
+    global last_scan_duration_ms, last_scan_new_count, last_scan_checked_units
+    global last_scan_failed_units, last_scan_error, skipped_scan_count
 
-    now = time.time()
-    # Expire dedup window (10 minutes)
-    expired = [k for k, (t, _) in _seen_keys.items() if now - t > 600]
-    for k in expired:
-        del _seen_keys[k]
+    lock = _get_scan_lock()
+    if lock.locked():
+        skipped_scan_count += 1
+        logger.info("Error scan skipped because another scan is already running")
+        return {
+            "ok": True,
+            "started": False,
+            "skipped": True,
+            "running": True,
+            "new": 0,
+            "status": scan_status(),
+        }
 
-    new_count = 0
-    for res in results:
-        if not isinstance(res, list):
-            continue
-        for entry in res:
-            key = _dedup_key(entry["sid"], entry["line"])
-            if key in _seen_keys:
-                seen_ts, entry_ref = _seen_keys[key]
-                if now - seen_ts < 600:
-                    # Same error within window — increment count, update ts
-                    entry_ref["count"] = entry_ref.get("count", 1) + 1
-                    entry_ref["ts"] = entry.get("ts", now)
-                    _seen_keys[key] = (now, entry_ref)
-                    continue
-                else:
+    async with lock:
+        started_monotonic = time.monotonic()
+        scan_time = time.time()
+        last_scan_started_ts = scan_time
+        last_scan_error = None
+
+        if last_scan_ts:
+            since_dt = datetime.fromtimestamp(last_scan_ts - 10, UTC)
+            since_str = since_dt.strftime("%Y-%m-%d %H:%M:%S")
+            since_ts = last_scan_ts - 10
+        else:
+            since_str = "30 minutes ago"
+            since_ts = time.time() - 1800
+
+        semaphore = asyncio.Semaphore(SCAN_CONCURRENCY)
+
+        async def scan_unit_limited(sid: str, unit: str) -> list[dict]:
+            async with semaphore:
+                return await _scan_unit(sid, unit, since_str)
+
+        tasks = []
+        target_count = 0
+        for sid, svc in cfg.SERVICES.items():
+            unit = svc.get("unit")
+            if unit:
+                tasks.append(scan_unit_limited(sid, unit))
+                target_count += 1
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        now = time.time()
+        # Expire dedup window (10 minutes)
+        expired = [k for k, (t, _) in _seen_keys.items() if now - t > 600]
+        for k in expired:
+            del _seen_keys[k]
+
+        failed_units = 0
+        new_count = 0
+        for res in results:
+            if isinstance(res, Exception):
+                failed_units += 1
+                logger.warning("Error scan target failed: %s", res)
+                continue
+            if not isinstance(res, list):
+                continue
+            for entry in res:
+                key = _dedup_key(entry["sid"], entry["line"])
+                if key in _seen_keys:
+                    seen_ts, entry_ref = _seen_keys[key]
+                    if now - seen_ts < 600:
+                        # Same error within window — increment count, update ts
+                        entry_ref["count"] = entry_ref.get("count", 1) + 1
+                        entry_ref["ts"] = entry.get("ts", now)
+                        _seen_keys[key] = (now, entry_ref)
+                        continue
                     del _seen_keys[key]
-            entry["count"] = 1
-            entry["id"] = f"{entry['sid']}_{int(entry['ts'] * 1000)}"
-            error_history.append(entry)
-            _seen_keys[key] = (now, entry)
-            new_count += 1
+                entry["count"] = 1
+                entry["id"] = f"{entry['sid']}_{int(entry['ts'] * 1000)}"
+                error_history.append(entry)
+                _seen_keys[key] = (now, entry)
+                new_count += 1
 
-    last_scan_ts = scan_time
-    scan_count += 1
-    logger.info(f"Error scan #{scan_count} completed: {new_count} new errors/warnings found")
-    return new_count
+        last_scan_ts = scan_time
+        scan_count += 1
+        last_scan_finished_ts = time.time()
+        last_scan_duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+        last_scan_new_count = new_count
+        last_scan_checked_units = target_count
+        last_scan_failed_units = failed_units
+        if failed_units:
+            last_scan_error = f"{failed_units} scan target(s) failed"
+        logger.info(
+            "Error scan #%s completed: %s new errors/warnings, %s targets, %sms",
+            scan_count,
+            new_count,
+            target_count,
+            last_scan_duration_ms,
+        )
+        return {
+            "ok": failed_units == 0,
+            "started": True,
+            "skipped": False,
+            "running": False,
+            "new": new_count,
+            "checked_units": target_count,
+            "failed_units": failed_units,
+            "duration_ms": last_scan_duration_ms,
+            "status": scan_status(),
+        }
 
 
 def clear_errors() -> None:
@@ -513,4 +638,12 @@ async def error_scan_loop() -> None:
         await asyncio.sleep(SCAN_INTERVAL)
 
 
-__all__ = ["clear_errors", "error_history", "error_scan_loop", "last_scan_ts", "scan_all", "scan_count"]
+__all__ = [
+    "clear_errors",
+    "error_history",
+    "error_scan_loop",
+    "last_scan_ts",
+    "scan_all",
+    "scan_count",
+    "scan_status",
+]

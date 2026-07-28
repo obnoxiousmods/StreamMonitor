@@ -170,6 +170,31 @@ def _gib(value: int | float) -> float:
     return round(value / 1024**3, 1)
 
 
+def _collect_psi(resource: str) -> dict | None:
+    """Read /proc/pressure/<resource> (some/full avg10/avg60/avg300 + total stall us)."""
+    try:
+        text = Path(f"/proc/pressure/{resource}").read_text()
+    except OSError:
+        return None
+    out: dict = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        kind = parts[0]  # "some" or "full"
+        fields = dict(p.split("=", 1) for p in parts[1:])
+        try:
+            out[kind] = {
+                "avg10": float(fields["avg10"]),
+                "avg60": float(fields["avg60"]),
+                "avg300": float(fields["avg300"]),
+                "total_us": int(fields["total"]),
+            }
+        except (KeyError, ValueError):
+            continue
+    return out or None
+
+
 def _collect_swap() -> dict | None:
     """Read swap directly from kernel meminfo.
 
@@ -416,10 +441,12 @@ def _collect_system_sync() -> dict:
 
         # ── CPU ──
         try:
+            per_core = psutil.cpu_percent(interval=0.5, percpu=True)
             cpu: dict = {
                 "physical_cores": psutil.cpu_count(logical=False) or 0,
                 "logical_cores": psutil.cpu_count(logical=True) or 0,
-                "usage_pct": psutil.cpu_percent(interval=0.5),
+                "usage_pct": round(sum(per_core) / len(per_core), 1) if per_core else 0.0,
+                "per_core_pct": per_core,
             }
             freq = psutil.cpu_freq()
             if freq:
@@ -474,6 +501,14 @@ def _collect_system_sync() -> dict:
         except Exception:
             pass
 
+        # ── Memory pressure (PSI) ──
+        try:
+            psi = _collect_psi("memory")
+            if psi:
+                result["memory_pressure"] = psi
+        except Exception:
+            pass
+
         # ── Disk partitions ──
         try:
             skip_fs = {
@@ -524,9 +559,13 @@ def _collect_system_sync() -> dict:
                 total_read = sum(v.read_bytes for v in whole.values())
                 total_write = sum(v.write_bytes for v in whole.values())
                 dio = type("DIO", (), {"read_bytes": total_read, "write_bytes": total_write})()
+                # Mirror the net-I/O baseline discipline: refresh _prev_disk_io
+                # every call so the byte delta is always measured over the same
+                # dt (updating it only when dt>=2s divided a multi-interval
+                # accumulation by one short dt → inflated rates).
                 if _prev_disk_io is not None and _prev_io_time > 0:
                     dt = now - _prev_io_time
-                    if dt >= 2.0:
+                    if dt > 0:
                         rb = max(0.0, (dio.read_bytes - _prev_disk_io.read_bytes) / dt)
                         wb = max(0.0, (dio.write_bytes - _prev_disk_io.write_bytes) / dt)
                         result["disk_io"] = {
@@ -537,9 +576,7 @@ def _collect_system_sync() -> dict:
                             "read_total_gb": round(dio.read_bytes / 1024**3, 2),
                             "write_total_gb": round(dio.write_bytes / 1024**3, 2),
                         }
-                        _prev_disk_io = dio
-                else:
-                    _prev_disk_io = dio
+                _prev_disk_io = dio
         except Exception:
             pass
 

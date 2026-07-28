@@ -36,29 +36,78 @@ uv run uvicorn app:app --host 127.0.0.1 --port 9090
 
 ## systemd Service
 
-Create `/etc/systemd/system/streammonitor.service`:
+Run the provided installer (sets ownership, installs the hardened service, and
+enables a health-check timer):
+
+```bash
+sudo ./scripts/install-service.sh
+```
+
+Or create `/etc/systemd/system/streammonitor.service` manually:
 
 ```ini
 [Unit]
-Description=StreamMonitor - Infrastructure Monitoring Dashboard
-After=network.target
+Description=StreamMonitor - Streaming Stack Health Monitor
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=your-user
 Group=media
 WorkingDirectory=/path/to/StreamMonitor
-ExecStart=uv run uvicorn app:app --host 127.0.0.1 --port 9090 --log-level info
-Restart=on-failure
+Environment=PYTHONUNBUFFERED=1
+
+# Sync the venv on every start so a dependency mismatch cannot take the service down.
+ExecStartPre=/bin/sh -c 'cd /path/to/StreamMonitor && uv sync --frozen --no-dev'
+
+ExecStart=uv run --no-dev uvicorn app:app --host 127.0.0.1 --port 9090 --log-level info
+
+Restart=always
 RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+TimeoutStartSec=30
+
+UMask=0002
+
+# Hardening (compatible with sudo-based service control/journal reading).
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectSystem=full
+ReadWritePaths=/path/to/StreamMonitor/data /path/to/StreamMonitor/logs /path/to/StreamMonitor/.cache /tmp
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RemoveIPC=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=streammonitor
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+Then reload and start:
+
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now streammonitor.service
+```
+
+### Health-check timer
+
+A monotonic one-minute timer restarts the service if `/api/ping` fails twice. It uses `OnUnitInactiveSec=1min`, so checks do not pile up or burst after a slow run:
+
+```bash
+sudo systemctl enable --now streammonitor-health.timer
 ```
 
 ## sudo Configuration

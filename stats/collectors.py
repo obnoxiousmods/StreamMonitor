@@ -6,6 +6,7 @@ import asyncio
 import base64
 import contextlib
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -93,6 +94,20 @@ _dispatcharr_token_expiry: float = 0.0
 _stremthru_db_cache: dict = {}
 _stremthru_db_cache_ts: float = 0.0
 _STREMTHRU_DB_TTL = 300
+_prowlarr_indexerstats_cache: dict = {}
+_prowlarr_indexerstats_cache_ts: float = 0.0
+_prowlarr_indexerstats_attempt_ts: float = 0.0
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+_PROWLARR_INDEXERSTATS_INTERVAL = _env_int("STREAMMONITOR_PROWLARR_INDEXERSTATS_INTERVAL", 900)
+_PROWLARR_INDEXERSTATS_TIMEOUT = 5.0
 
 
 async def _get_dispatcharr_token() -> str:
@@ -343,7 +358,14 @@ async def collect_mediafusion() -> dict:
 
 async def collect_stremthru() -> dict:
     basic = base64.b64encode(f"{cfg.STREMTHRU_USER}:{cfg.STREMTHRU_PASS}".encode()).decode()
-    auth_h = {"Authorization": f"Basic {basic}"}
+    # /v0/store/user is store-scoped: without X-StremThru-Store-Name StremThru answers
+    # 400 "missing store", which this collector was emitting every 5 minutes.
+    # Only X-StremThru-Authorization: a plain Authorization header is forwarded to the
+    # store as its API token, which makes the store reject it as bad_token.
+    auth_h = {
+        "X-StremThru-Authorization": f"Basic {basic}",
+        "X-StremThru-Store-Name": os.getenv("STREAMMONITOR_STREMTHRU_STORE", "realdebrid"),
+    }
     async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
         health, mfest, store_user = await asyncio.gather(
             _get(c, f"{cfg.STREMTHRU_URL}/v0/health"),
@@ -587,14 +609,6 @@ async def collect_aiostreams() -> dict:
     return result
 
 
-async def collect_flaresolverr() -> dict:
-    async with httpx.AsyncClient(timeout=8) as c:
-        h = await _get(c, f"{cfg.FLARESOLVERR_URL}/health")
-    if isinstance(h, dict):
-        return {"status": h.get("status", ""), "version": h.get("version", "")}
-    return {}
-
-
 async def collect_jackett() -> dict:
     result: dict = {}
     indexer_dir = Path(cfg.JACKETT_INDEXER_DIR)
@@ -619,13 +633,13 @@ async def collect_prowlarr() -> dict:
     base = cfg.PROWLARR_URL
     h = {"X-Api-Key": cfg.PROWLARR_KEY}
     async with httpx.AsyncClient(timeout=10) as c:
-        status, indexers, health, istats = await asyncio.gather(
+        status, indexers, health = await asyncio.gather(
             _get(c, f"{base}/api/v1/system/status", h),
             _get(c, f"{base}/api/v1/indexer", h),
             _get(c, f"{base}/api/v1/health", h),
-            _get(c, f"{base}/api/v1/indexerstats", h),
             return_exceptions=True,
         )
+        istats, istats_stale, istats_age = await _get_prowlarr_indexerstats(c, base, h)
     result: dict = {}
     if isinstance(status, dict):
         result["version"] = status.get("version", "")
@@ -641,7 +655,42 @@ async def collect_prowlarr() -> dict:
         result["total_queries"] = sum(i.get("numberOfQueries", 0) for i in idxs)
         result["total_grabs"] = sum(i.get("numberOfGrabs", 0) for i in idxs)
         result["total_failed_queries"] = sum(i.get("numberOfFailedQueries", 0) for i in idxs)
+        result["indexerstats_age_seconds"] = istats_age
+        result["indexerstats_stale"] = istats_stale
     return result
+
+
+async def _get_prowlarr_indexerstats(
+    client: httpx.AsyncClient,
+    base: str,
+    headers: dict,
+) -> tuple[dict | None, bool, int | None]:
+    global _prowlarr_indexerstats_attempt_ts, _prowlarr_indexerstats_cache, _prowlarr_indexerstats_cache_ts
+
+    now = time.monotonic()
+    if now - _prowlarr_indexerstats_attempt_ts < _PROWLARR_INDEXERSTATS_INTERVAL:
+        if not _prowlarr_indexerstats_cache:
+            return None, True, None
+        age = int(now - _prowlarr_indexerstats_cache_ts)
+        return _prowlarr_indexerstats_cache, False, age
+
+    _prowlarr_indexerstats_attempt_ts = now
+    istats = await _get(
+        client,
+        f"{base}/api/v1/indexerstats",
+        headers,
+        timeout=_PROWLARR_INDEXERSTATS_TIMEOUT,
+    )
+    if isinstance(istats, dict):
+        _prowlarr_indexerstats_cache = istats
+        _prowlarr_indexerstats_cache_ts = time.monotonic()
+        return istats, False, 0
+
+    if _prowlarr_indexerstats_cache:
+        age = int(now - _prowlarr_indexerstats_cache_ts)
+        return _prowlarr_indexerstats_cache, True, age
+
+    return None, True, None
 
 
 async def _arr(base: str, key: str, *, path: str = "v3") -> dict:

@@ -58,7 +58,7 @@ async def speedtest_download(request: Request):
     ip = _client_ip(request)
     if not _check_rate(ip):
         return JSONResponse(
-            {"error": "Rate limit exceeded. Max 2 tests per 10 minutes."},
+            {"error": "Rate limit exceeded. Max 20 tests per 10 minutes."},
             status_code=429,
         )
 

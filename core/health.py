@@ -4,20 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from collections import deque
 from datetime import UTC, datetime
 
 import httpx
 
+import core.alerts as _alerts
+import core.broadcast as _broadcast
 import core.config as _cfg
+import core.db as _db
 from core.config import SERVICES
 from core.process import run_command
 
 logger = logging.getLogger(__name__)
 
 HISTORY_LEN = 120
-CHECK_INTERVAL = 5
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+CHECK_INTERVAL = _env_int("STREAMMONITOR_HEALTH_INTERVAL", 15)
 
 hist: dict[str, deque] = {k: deque(maxlen=HISTORY_LEN) for k in SERVICES}
 cur: dict[str, dict] = {}
@@ -90,14 +103,14 @@ async def poll(sid: str, cfg: dict) -> dict:
         svc_ok, svc_state = await systemd_active(cfg["unit"])
     else:
         svc_ok, svc_state = True, "not configured"
-    latency, http_ok, msg = None, None, svc_state
+    latency, http_ok, http_status, msg = None, None, None, svc_state
 
     if cfg.get("url"):
         # Resolve headers dynamically so runtime key updates take effect
         check_cfg = dict(cfg)
         check_cfg["headers"] = _cfg.get_live_headers(sid)
         t0 = time.monotonic()
-        http_ok_bool, _, msg = await http_check(check_cfg)
+        http_ok_bool, http_status, msg = await http_check(check_cfg)
         latency = int((time.monotonic() - t0) * 1000)
         http_ok = http_ok_bool
     else:
@@ -124,11 +137,15 @@ async def poll(sid: str, cfg: dict) -> dict:
     was_ok = prev["ok"] if prev else None
     if not overall_ok and was_ok is not False:
         logger.warning(f"Service {sid} ({cfg['name']}) is DOWN: {msg}")
+        _alerts.notify_service_transition(sid, cfg["name"], is_up=False, message=msg)
     elif overall_ok and was_ok is False:
         logger.info(f"Service {sid} ({cfg['name']}) recovered (UP)")
+        _alerts.notify_service_transition(sid, cfg["name"], is_up=True, message=msg)
 
     hist[sid].append(result)
     cur[sid] = result
+    _db.write_health_sample(sid, overall_ok, latency, http_status)
+    _broadcast.publish("status", {"service_id": sid, **result})
     return result
 
 

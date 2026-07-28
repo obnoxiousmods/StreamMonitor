@@ -89,6 +89,18 @@ MEDIAFUSION_EMAIL = _k("MEDIAFUSION_EMAIL", "mediafusion_email", "")
 MEDIAFUSION_USER_PASS = _k("MEDIAFUSION_USER_PASS", "mediafusion_password", "")
 AIOSTREAMS_SECRET = _k("AIOSTREAMS_SECRET", "aiostreams_secret", "")
 
+# ── Postgres (metrics/history store) ────────────────────────────────────────
+PG_HOST = _k("STREAMMONITOR_PG_HOST", "streammonitor_pg_host", "127.0.0.1")
+PG_PORT = int(_k("STREAMMONITOR_PG_PORT", "streammonitor_pg_port", "5432") or 5432)
+PG_USER = _k("STREAMMONITOR_PG_USER", "streammonitor_pg_user", "streammonitor")
+PG_PASSWORD = _k("STREAMMONITOR_PG_PASSWORD", "streammonitor_pg_password", "")
+PG_DATABASE = _k("STREAMMONITOR_PG_DATABASE", "streammonitor_pg_database", "streammonitor")
+
+# ── Alerting (Discord/ntfy webhooks) ────────────────────────────────────────
+ALERT_DISCORD_WEBHOOK = _k("STREAMMONITOR_DISCORD_WEBHOOK", "streammonitor_discord_webhook", "")
+ALERT_NTFY_URL = _k("STREAMMONITOR_NTFY_URL", "streammonitor_ntfy_url", "")
+ALERT_NTFY_TOPIC = _k("STREAMMONITOR_NTFY_TOPIC", "streammonitor_ntfy_topic", "")
+
 # Keys that are surfaced in the Settings UI (name → current value, masked in display)
 KEY_REGISTRY: dict[str, dict] = {
     "prowlarr": {"label": "Prowlarr API Key", "attr": "PROWLARR_KEY", "group": "Indexers"},
@@ -98,7 +110,6 @@ KEY_REGISTRY: dict[str, dict] = {
     "lidarr": {"label": "Lidarr API Key", "attr": "LIDARR_KEY", "group": "Arr Suite"},
     "bazarr": {"label": "Bazarr API Key", "attr": "BAZARR_KEY", "group": "Arr Suite"},
     "jellyfin": {"label": "Jellyfin API Key", "attr": "JELLYFIN_KEY", "group": "Media Servers"},
-    "jellyseerr": {"label": "Jellyseerr API Key", "attr": "JELLYSEERR_KEY", "group": "Media Servers"},
     "zilean": {"label": "Zilean API Key", "attr": "ZILEAN_KEY", "group": "Streaming"},
     "stremthru_pass": {"label": "StremThru Password", "attr": "STREMTHRU_PASS", "group": "Streaming"},
     "comet_admin_password": {"label": "Comet Admin Password", "attr": "COMET_ADMIN_PASS", "group": "Streaming"},
@@ -107,6 +118,13 @@ KEY_REGISTRY: dict[str, dict] = {
     "dispatcharr_pass": {"label": "Dispatcharr Password", "attr": "DISPATCHARR_PASS", "group": "Dispatching"},
     "qbt_pass": {"label": "qBittorrent Password", "attr": "QBT_PASS", "group": "Downloads"},
     "qbt_user": {"label": "qBittorrent Username", "attr": "QBT_USER", "group": "Downloads"},
+    "streammonitor_discord_webhook": {
+        "label": "Discord Webhook URL",
+        "attr": "ALERT_DISCORD_WEBHOOK",
+        "group": "Alerting",
+    },
+    "streammonitor_ntfy_url": {"label": "ntfy Server URL", "attr": "ALERT_NTFY_URL", "group": "Alerting"},
+    "streammonitor_ntfy_topic": {"label": "ntfy Topic", "attr": "ALERT_NTFY_TOPIC", "group": "Alerting"},
 }
 
 # URLs surfaced in the Settings UI
@@ -118,15 +136,12 @@ URL_REGISTRY: dict[str, dict] = {
     "aiostreams_url": {"label": "AIOStreams", "attr": "AIOSTREAMS_URL", "group": "Streaming"},
     "jackett_url": {"label": "Jackett", "attr": "JACKETT_URL", "group": "Indexers"},
     "prowlarr_url": {"label": "Prowlarr", "attr": "PROWLARR_URL", "group": "Indexers"},
-    "flaresolverr_url": {"label": "FlareSolverr", "attr": "FLARESOLVERR_URL", "group": "Indexers"},
     "byparr_url": {"label": "Byparr", "attr": "BYPARR_URL", "group": "Indexers"},
     "radarr_url": {"label": "Radarr", "attr": "RADARR_URL", "group": "Arr Suite"},
     "sonarr_url": {"label": "Sonarr", "attr": "SONARR_URL", "group": "Arr Suite"},
     "lidarr_url": {"label": "Lidarr", "attr": "LIDARR_URL", "group": "Arr Suite"},
     "bazarr_url": {"label": "Bazarr", "attr": "BAZARR_URL", "group": "Arr Suite"},
     "jellyfin_url": {"label": "Jellyfin", "attr": "JELLYFIN_URL", "group": "Media Servers"},
-    "plex_url": {"label": "Plex", "attr": "PLEX_URL", "group": "Media Servers"},
-    "jellyseerr_url": {"label": "Jellyseerr", "attr": "JELLYSEERR_URL", "group": "Media Servers"},
     "dispatcharr_url": {"label": "Dispatcharr", "attr": "DISPATCHARR_URL", "group": "Dispatching"},
     "dispatcharr_api_url": {
         "label": "Dispatcharr API",
@@ -146,15 +161,12 @@ _SERVICE_URL_PATHS: dict[str, tuple[str, str]] = {
     "aiostreams": ("AIOSTREAMS_URL", "/stremio/manifest.json"),
     "jackett": ("JACKETT_URL", None),  # special — rebuilt in get_live_headers
     "prowlarr": ("PROWLARR_URL", "/api/v1/system/status"),
-    "flaresolverr": ("FLARESOLVERR_URL", "/health"),
     "byparr": ("BYPARR_URL", "/"),
     "radarr": ("RADARR_URL", "/api/v3/system/status"),
     "sonarr": ("SONARR_URL", "/api/v3/system/status"),
     "lidarr": ("LIDARR_URL", "/api/v1/system/status"),
     "bazarr": ("BAZARR_URL", "/api/system/status"),
     "jellyfin": ("JELLYFIN_URL", "/System/Info/Public"),
-    "plex": ("PLEX_URL", "/identity"),
-    "jellyseerr": ("JELLYSEERR_URL", "/api/v1/status"),
     "dispatcharr": ("DISPATCHARR_URL", "/"),
     "mediaflow": ("MEDIAFLOW_URL", "/health"),
     "qbittorrent": ("QBITTORRENT_URL", "/"),
@@ -258,13 +270,12 @@ def _unit(env_var: str, default: str | None) -> str | None:
 # ── Service Base URLs ────────────────────────────────────────────────────────
 # Override any of these via environment variables or the Settings UI.
 COMET_URL = _url("COMET_URL", "comet_url", "http://127.0.0.1:8070")
-MEDIAFUSION_URL = _url("MEDIAFUSION_URL", "mediafusion_url", "https://127.0.0.1:8090")
+MEDIAFUSION_URL = _url("MEDIAFUSION_URL", "mediafusion_url", "http://127.0.0.1:8090")
 STREMTHRU_URL = _url("STREMTHRU_URL", "stremthru_url", "http://127.0.0.1:8080")
 ZILEAN_URL = _url("ZILEAN_URL", "zilean_url", "http://127.0.0.1:8181")
 AIOSTREAMS_URL = _url("AIOSTREAMS_URL", "aiostreams_url", "http://127.0.0.1:7070")
 JACKETT_URL = _url("JACKETT_URL", "jackett_url", "http://127.0.0.1:9117")
 PROWLARR_URL = _url("PROWLARR_URL", "prowlarr_url", "http://127.0.0.1:9696")
-FLARESOLVERR_URL = _url("FLARESOLVERR_URL", "flaresolverr_url", "http://127.0.0.1:8191")
 BYPARR_URL = _url("BYPARR_URL", "byparr_url", "http://127.0.0.1:8192")
 RADARR_URL = _url("RADARR_URL", "radarr_url", "http://127.0.0.1:7878")
 SONARR_URL = _url("SONARR_URL", "sonarr_url", "http://127.0.0.1:8989")
@@ -310,6 +321,13 @@ BENCH_TORRENTIO_RD_KEY = os.environ.get("BENCH_TORRENTIO_RD_KEY", "")
 
 # ── Service Definitions ───────────────────────────────────────────────────────
 SERVICES: dict[str, dict] = {
+    "obnoxioustv": {
+        "name": "ObnoxiousTV",
+        "unit": "obnoxioustv",
+        "url": "http://127.0.0.1:8071/health/ready",
+        "ok": [200],
+        "category": "streaming",
+    },
     "comet": {
         "name": "Comet",
         "unit": _unit("COMET_UNIT", "comet"),
@@ -351,21 +369,6 @@ SERVICES: dict[str, dict] = {
         "name": "Jackett",
         "unit": _unit("JACKETT_UNIT", "jackett"),
         "url": f"{JACKETT_URL}/api/v2.0/indexers/all/results?apikey={JACKETT_KEY}&Query=health&Limit=1",
-        "ok": [200],
-        "category": "indexers",
-    },
-    "prowlarr": {
-        "name": "Prowlarr",
-        "unit": _unit("PROWLARR_UNIT", "prowlarr"),
-        "url": f"{PROWLARR_URL}/api/v1/system/status",
-        "ok": [200],
-        "headers": {"X-Api-Key": PROWLARR_KEY},
-        "category": "indexers",
-    },
-    "flaresolverr": {
-        "name": "FlareSolverr",
-        "unit": _unit("FLARESOLVERR_UNIT", "flaresolverr"),
-        "url": f"{FLARESOLVERR_URL}/health",
         "ok": [200],
         "category": "indexers",
     },
@@ -416,22 +419,6 @@ SERVICES: dict[str, dict] = {
         "ok": [200],
         "category": "media",
     },
-    "plex": {
-        "name": "Plex",
-        "unit": _unit("PLEX_UNIT", "plexmediaserver"),
-        "url": f"{PLEX_URL}/identity",
-        "ok": [200],
-        "category": "media",
-    },
-    "jellyseerr": {
-        "name": "Jellyseerr",
-        "unit": _unit("JELLYSEERR_UNIT", "jellyseerr"),
-        "url": f"{JELLYSEERR_URL}/api/v1/status",
-        "ok": [200],
-        "headers": {"X-Api-Key": JELLYSEERR_KEY},
-        "follow_redirects": True,
-        "category": "media",
-    },
     "dispatcharr": {
         "name": "Dispatcharr",
         "unit": _unit("DISPATCHARR_UNIT", "dispatcharr"),
@@ -480,7 +467,6 @@ _SERVICE_KEY_ATTRS: dict[str, str] = {
     "sonarr": "SONARR_KEY",
     "lidarr": "LIDARR_KEY",
     "bazarr": "BAZARR_KEY",
-    "jellyseerr": "JELLYSEERR_KEY",
 }
 
 
@@ -512,15 +498,12 @@ WEB_URLS: dict[str, str] = {
     "aiostreams": "https://aiostreams.obnoxious.lol",
     "jackett": "https://jackett.obnoxious.lol",
     "prowlarr": "https://prowlarr.obnoxious.lol",
-    "flaresolverr": "https://flare.obby.ca",
     "byparr": "https://byparr.obnoxious.lol",
     "radarr": "https://radarr.obnoxious.lol",
     "sonarr": "https://sonarr.obnoxious.lol",
     "lidarr": "https://lidarr.obnoxious.lol",
     "bazarr": "https://bazarr.obnoxious.lol",
     "jellyfin": "https://jellyfin.obnoxious.lol",
-    "plex": "https://plex.obnoxious.lol/web",
-    "jellyseerr": "https://jellyseerr.obnoxious.lol",
     "dispatcharr": "https://dispatcharr.obnoxious.lol",
     "mediaflow": "https://mediaflow.obby.ca",
     "qbittorrent": "https://qbt.obnoxious.lol",
@@ -550,11 +533,8 @@ GITHUB_REPOS: dict[str, str] = {
     "lidarr": "Lidarr/Lidarr",
     "bazarr": "morpheus65535/bazarr",
     "jellyfin": "jellyfin/jellyfin",
-    "jellyseerr": "fallenbagel/jellyseerr",
-    # plex omitted — pms-docker tags are helm-chart versions, not Plex versions
     "dispatcharr": "dispatcharr/dispatcharr",
     "mediaflow": "mhdzumair/mediaflow-proxy",
-    "flaresolverr": "FlareSolverr/FlareSolverr",
     "byparr": "ThePhaseless/Byparr",
     "pgbouncer": "pgbouncer/pgbouncer",
     "qbittorrent": "qbittorrent/qBittorrent",

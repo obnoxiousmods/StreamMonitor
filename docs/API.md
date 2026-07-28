@@ -336,18 +336,40 @@ Unauthenticated service health summary. Designed for external uptime monitors, s
 
 ```json
 {
+  "updated_at": "2026-04-21T19:00:50Z",
+  "window_minutes": 30,
+  "availability_pct": 95.4,
   "services": {
     "comet": {
+      "id": "comet",
       "name": "Comet",
       "ok": true,
       "latency_ms": 142,
-      "category": "streaming"
+      "category": "streaming",
+      "availability_pct": 99.2,
+      "history": [true, true, true, true, true, true],
+      "updated_at": "2026-04-21T19:00:50Z"
     },
     "mediafusion": {
+      "id": "mediafusion",
       "name": "MediaFusion",
       "ok": true,
       "latency_ms": 89,
-      "category": "streaming"
+      "category": "streaming",
+      "availability_pct": 97.5,
+      "history": [true, true, true, false, true, true],
+      "updated_at": "2026-04-21T19:00:50Z"
+    }
+  },
+  "categories": {
+    "streaming": {
+      "id": "streaming",
+      "label": "Streaming",
+      "total": 5,
+      "up": 4,
+      "down": 1,
+      "availability_pct": 94.1,
+      "services": ["comet", "mediafusion", "aiostreams"]
     }
   },
   "total": 26,
@@ -358,11 +380,25 @@ Unauthenticated service health summary. Designed for external uptime monitors, s
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `updated_at` | string\|null | ISO timestamp of the newest public health sample |
+| `window_minutes` | number | Rolling monitor window used for public availability percentages |
+| `availability_pct` | number\|null | Combined rolling availability across the current in-memory health window |
 | `services` | object | Map of service ID → health snapshot |
+| `services[id].id` | string | Service identifier |
 | `services[id].name` | string | Human-readable service name |
 | `services[id].ok` | boolean\|null | `true` = healthy, `false` = down, `null` = not yet checked |
 | `services[id].latency_ms` | integer\|null | Last HTTP probe latency in milliseconds |
 | `services[id].category` | string | Service category (e.g. `streaming`, `arr`, `media_server`) |
+| `services[id].availability_pct` | number\|null | Rolling availability for that service within the public monitor window |
+| `services[id].history` | array | Most recent public health points, newest last, containing `true`, `false`, or `null` |
+| `services[id].updated_at` | string\|null | ISO timestamp for the latest service sample |
+| `categories` | object | Aggregate health grouped by category ID |
+| `categories[id].label` | string | Human-readable category label |
+| `categories[id].total` | integer | Number of monitored services in that category |
+| `categories[id].up` | integer | Number of currently healthy services in that category |
+| `categories[id].down` | integer | Number of currently unhealthy services in that category |
+| `categories[id].availability_pct` | number\|null | Rolling availability for that category across the monitor window |
+| `categories[id].services` | array | Service IDs included in that category |
 | `total` | integer | Total number of monitored services |
 | `up` | integer | Number of services currently healthy |
 | `down` | integer | Number of services currently unhealthy |
@@ -384,10 +420,11 @@ import requests
 
 data = requests.get("https://monitor.obby.ca/api/public").json()
 print(f"{data['up']}/{data['total']} services up")
+print(f"Rolling availability: {data['availability_pct']}% over {data['window_minutes']} minutes")
 
 for sid, svc in data["services"].items():
     status = "✅" if svc["ok"] else "❌"
-    print(f"  {status} {svc['name']} ({svc.get('latency_ms', '?')}ms)")
+    print(f"  {status} {svc['name']} ({svc.get('latency_ms', '?')}ms, {svc.get('availability_pct', '?')}%)")
 ```
 
 </details>
@@ -398,8 +435,9 @@ for sid, svc in data["services"].items():
 ```js
 const data = await fetch("https://monitor.obby.ca/api/public").then(r => r.json());
 console.log(`${data.up}/${data.total} services up`);
+console.log(`Rolling availability: ${data.availability_pct}% over ${data.window_minutes} minutes`);
 for (const [id, svc] of Object.entries(data.services)) {
-  console.log(`${svc.ok ? "✅" : "❌"} ${svc.name} (${svc.latency_ms ?? "?"}ms)`);
+  console.log(`${svc.ok ? "✅" : "❌"} ${svc.name} (${svc.latency_ms ?? "?"}ms, ${svc.availability_pct ?? "?"}%)`);
 }
 ```
 
@@ -410,16 +448,33 @@ for (const [id, svc] of Object.entries(data.services)) {
 
 ```go
 type ServiceHealth struct {
+    ID         string  `json:"id"`
     Name      string  `json:"name"`
     Ok        *bool   `json:"ok"`
     LatencyMs *int    `json:"latency_ms"`
     Category  string  `json:"category"`
+    AvailabilityPct *float64 `json:"availability_pct"`
+    History    []*bool `json:"history"`
+    UpdatedAt  *string `json:"updated_at"`
+}
+type CategoryHealth struct {
+    ID              string   `json:"id"`
+    Label           string   `json:"label"`
+    Total           int      `json:"total"`
+    Up              int      `json:"up"`
+    Down            int      `json:"down"`
+    AvailabilityPct *float64 `json:"availability_pct"`
+    Services        []string `json:"services"`
 }
 type PublicResponse struct {
-    Services map[string]ServiceHealth `json:"services"`
-    Total    int                      `json:"total"`
-    Up       int                      `json:"up"`
-    Down     int                      `json:"down"`
+    UpdatedAt       *string                      `json:"updated_at"`
+    WindowMinutes   float64                      `json:"window_minutes"`
+    AvailabilityPct *float64                     `json:"availability_pct"`
+    Services        map[string]ServiceHealth     `json:"services"`
+    Categories      map[string]CategoryHealth    `json:"categories"`
+    Total           int                          `json:"total"`
+    Up              int                          `json:"up"`
+    Down            int                          `json:"down"`
 }
 
 resp, _ := http.Get("https://monitor.obby.ca/api/public")
@@ -427,6 +482,7 @@ defer resp.Body.Close()
 var data PublicResponse
 json.NewDecoder(resp.Body).Decode(&data)
 fmt.Printf("%d/%d services up\n", data.Up, data.Total)
+fmt.Printf("Rolling availability: %.1f%%\n", *data.AvailabilityPct)
 ```
 
 </details>
@@ -437,9 +493,10 @@ fmt.Printf("%d/%d services up\n", data.Up, data.Total)
 ```php
 $data = json_decode(file_get_contents("https://monitor.obby.ca/api/public"), true);
 echo "{$data['up']}/{$data['total']} services up\n";
+echo "Rolling availability: {$data['availability_pct']}%\n";
 foreach ($data['services'] as $id => $svc) {
     $icon = $svc['ok'] ? "✅" : "❌";
-    echo "  $icon {$svc['name']} ({$svc['latency_ms']}ms)\n";
+    echo "  $icon {$svc['name']} ({$svc['latency_ms']}ms, {$svc['availability_pct']}%)\n";
 }
 ```
 
@@ -1460,7 +1517,7 @@ for _, res := range bench.Results {
 
 ### GET /api/errors
 
-Returns the rolling error and warning history scanned from service logs. Errors are deduplicated and classified by severity. Logs are scanned every 2 minutes automatically; you can also trigger an immediate scan via `POST /api/errors/scan`.
+Returns the rolling error and warning history scanned from service logs. Errors are deduplicated and classified by severity. Logs are scanned automatically; you can also trigger a single-flight background scan via `POST /api/errors/scan`.
 
 **Response**
 
@@ -1479,7 +1536,17 @@ Returns the rolling error and warning history scanned from service logs. Errors 
   "last_scan": 1712500800.0,
   "scan_count": 142,
   "total_errors": 3,
-  "total_warnings": 12
+  "total_warnings": 12,
+  "scan": {
+    "running": false,
+    "last_duration_ms": 2483,
+    "last_new": 2599,
+    "checked_units": 21,
+    "failed_units": 0,
+    "skipped_scan_count": 1,
+    "journal_lines": 1500,
+    "concurrency": 4
+  }
 }
 ```
 
@@ -1496,6 +1563,7 @@ Returns the rolling error and warning history scanned from service logs. Errors 
 | `scan_count` | integer | Total number of scans run since start |
 | `total_errors` | integer | Number of error-severity events in current history |
 | `total_warnings` | integer | Number of warning-severity events in current history |
+| `scan` | object | Current scanner state, last duration, bounded journal line count, concurrency, skipped scans, and failed target count |
 
 <details>
 <summary><strong>curl</strong></summary>
@@ -1507,8 +1575,8 @@ curl -b cookies.txt https://monitor.obby.ca/api/errors | jq '.errors[] | select(
 # Errors from a specific service
 curl -b cookies.txt https://monitor.obby.ca/api/errors | jq '.errors[] | select(.service == "mediafusion")'
 
-# Summary counts
-curl -b cookies.txt https://monitor.obby.ca/api/errors | jq '{errors: .total_errors, warnings: .total_warnings, last_scan: .last_scan}'
+# Summary counts and scanner telemetry
+curl -b cookies.txt https://monitor.obby.ca/api/errors | jq '{errors: .total_errors, warnings: .total_warnings, scan: .scan}'
 ```
 
 </details>
@@ -1582,12 +1650,12 @@ print("Error history cleared")
 
 ### POST /api/errors/scan
 
-Triggers an immediate background error scan without waiting for the 2-minute interval. Returns immediately; the scan runs asynchronously.
+Triggers an immediate background error scan without waiting for the normal interval. Returns immediately. If another scan is already running, no duplicate journal sweep is started and the response reports `skipped: true`.
 
 **Response**
 
 ```json
-{"ok": true}
+{"ok": true, "started": true, "skipped": false}
 ```
 
 <details>

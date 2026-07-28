@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import threading
 import time
 
@@ -16,6 +17,7 @@ except ImportError:
 _SAMPLE_LOCK = threading.Lock()
 _PREV_SAMPLE_AT = 0.0
 _PREV_CPU_TIMES: dict[int, tuple[float, float | None]] = {}
+_PREV_IO_BYTES: dict[int, tuple[int, int]] = {}
 
 
 def _cpu_seconds(cpu_times: object) -> float:
@@ -32,6 +34,25 @@ def _format_cmd(cmdline: object, name: str, length: int = 180) -> str:
     return name
 
 
+def _bin_name(cmdline: object, name: str) -> str:
+    """The short executable name — the last path segment of argv[0], falling back to
+    the kernel-reported comm name. Long interpreter invocations like
+    `/home/streammonitor/streammonitor/.venv/bin/python /home/streammonitor/streammonitor/.venv/bin/uvicorn ...`
+    become `uvicorn`, not the full path — that's the part a human actually scans for."""
+    if isinstance(cmdline, list) and cmdline:
+        argv0 = os.path.basename(str(cmdline[0]))
+        # Interpreter argv[0] (python, node, etc) — the real name is usually the next
+        # path-like argument (the script/module being run).
+        if argv0 in ("python", "python3", "node", "sh", "bash", "zsh") and len(cmdline) > 1:
+            for arg in cmdline[1:]:
+                arg_str = str(arg)
+                if arg_str.startswith("-"):
+                    continue
+                return os.path.basename(arg_str) or argv0
+        return argv0 or name
+    return name
+
+
 def _read_process_rows() -> list[dict]:
     if not _HAS_PSUTIL:
         return []
@@ -40,9 +61,11 @@ def _read_process_rows() -> list[dict]:
     cpu_count = psutil.cpu_count(logical=True) or 1
     rows: list[dict] = []
     next_cpu_times: dict[int, tuple[float, float | None]] = {}
+    next_io_bytes: dict[int, tuple[int, int]] = {}
 
     attrs = [
         "pid",
+        "ppid",
         "name",
         "cpu_times",
         "memory_percent",
@@ -52,6 +75,7 @@ def _read_process_rows() -> list[dict]:
         "cmdline",
         "create_time",
         "num_threads",
+        "nice",
     ]
     for proc in psutil.process_iter(attrs):
         with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -61,17 +85,36 @@ def _read_process_rows() -> list[dict]:
                 continue
 
             name = info.get("name") or "unknown"
+            cmdline = info.get("cmdline")
             cpu_time = _cpu_seconds(info.get("cpu_times"))
             create_time = info.get("create_time")
             memory_info = info.get("memory_info")
             rss_mb = round(memory_info.rss / 1024**2, 1) if memory_info else 0.0
+            # io_counters/num_fds are fetched separately (not via process_iter attrs):
+            # psutil raises AccessDenied for processes owned by other users, and letting
+            # that propagate out of the outer suppress() would drop the ENTIRE row, not
+            # just these fields.
+            try:
+                io = proc.io_counters()
+                read_bytes, write_bytes = io.read_bytes, io.write_bytes
+            except (psutil.AccessDenied, psutil.NoSuchProcess, AttributeError):
+                read_bytes = write_bytes = 0
+            try:
+                num_fds = proc.num_fds()
+            except (psutil.AccessDenied, psutil.NoSuchProcess, AttributeError):
+                num_fds = None
             next_cpu_times[pid] = (cpu_time, create_time)
+            next_io_bytes[pid] = (read_bytes, write_bytes)
+            uptime_sec = max(0.0, time.time() - create_time) if create_time else 0.0
             rows.append(
                 {
                     "pid": pid,
+                    "ppid": info.get("ppid"),
                     "name": name,
+                    "bin_name": _bin_name(cmdline, name),
                     "cpu_time": cpu_time,
                     "create_time": create_time,
+                    "uptime_sec": round(uptime_sec),
                     "cpu_pct": 0.0,
                     "cpu_total_pct": 0.0,
                     "mem_pct": round(info.get("memory_percent") or 0.0, 1),
@@ -79,31 +122,44 @@ def _read_process_rows() -> list[dict]:
                     "status": info.get("status", ""),
                     "user": _format_user(info.get("username")),
                     "threads": info.get("num_threads") or 0,
-                    "cmd": _format_cmd(info.get("cmdline"), name),
+                    "nice": info.get("nice"),
+                    "open_files": num_fds,
+                    "cmd": _format_cmd(cmdline, name),
+                    "io_read_bytes_s": 0,
+                    "io_write_bytes_s": 0,
+                    "net_rate_bytes_s": None,
+                    "net_sent_bytes_s": None,
+                    "net_recv_bytes_s": None,
                 }
             )
 
-    global _PREV_SAMPLE_AT, _PREV_CPU_TIMES
+    global _PREV_SAMPLE_AT, _PREV_CPU_TIMES, _PREV_IO_BYTES
     with _SAMPLE_LOCK:
         elapsed = now - _PREV_SAMPLE_AT if _PREV_SAMPLE_AT > 0 else 0.0
         prev_cpu_times = _PREV_CPU_TIMES
+        prev_io_bytes = _PREV_IO_BYTES
         _PREV_SAMPLE_AT = now
         _PREV_CPU_TIMES = next_cpu_times
+        _PREV_IO_BYTES = next_io_bytes
 
     if elapsed <= 0:
         return rows
 
     for row in rows:
         prev = prev_cpu_times.get(row["pid"])
-        if not prev:
-            continue
-        prev_cpu_time, prev_create_time = prev
-        if row["create_time"] and prev_create_time and row["create_time"] != prev_create_time:
-            continue
-        cpu_delta = max(0.0, row["cpu_time"] - prev_cpu_time)
-        core_pct = (cpu_delta / elapsed) * 100
-        row["cpu_pct"] = round(core_pct, 1)
-        row["cpu_total_pct"] = round(core_pct / cpu_count, 1)
+        if prev:
+            prev_cpu_time, prev_create_time = prev
+            if not (row["create_time"] and prev_create_time and row["create_time"] != prev_create_time):
+                cpu_delta = max(0.0, row["cpu_time"] - prev_cpu_time)
+                core_pct = (cpu_delta / elapsed) * 100
+                row["cpu_pct"] = round(core_pct, 1)
+                row["cpu_total_pct"] = round(core_pct / cpu_count, 1)
+
+        prev_io = prev_io_bytes.get(row["pid"])
+        if prev_io:
+            next_read, next_write = next_io_bytes.get(row["pid"], (0, 0))
+            row["io_read_bytes_s"] = round(max(0.0, (next_read - prev_io[0]) / elapsed))
+            row["io_write_bytes_s"] = round(max(0.0, (next_write - prev_io[1]) / elapsed))
 
     return rows
 

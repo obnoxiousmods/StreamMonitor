@@ -1,8 +1,20 @@
-"""AIOStreams log analyzer — parse journalctl output into structured analysis."""
+"""AIOStreams log analyzer — parse journalctl output into structured analysis.
+
+AIOStreams switched its logging to pino's pretty-printed format:
+
+    [HH:MM:SS.mmm] LEVEL: message
+        key: value
+        key2: value2
+
+Under `journalctl --output=short-iso` every physical line is additionally
+prefixed with `2026-07-18T11:24:43-07:00 lucy corepack[1712]: `, so the parser
+strips that prefix first, then reads pino header lines and their indented
+continuation fields. The full date comes from the journalctl prefix; the
+millisecond time comes from the pino header.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import time
@@ -13,88 +25,47 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 import core.config as cfg
+from core.process import CommandTimeoutError, run_command
 
 logger = logging.getLogger(__name__)
 
 # ── Regex patterns for log parsing ───────────────────────────────────────────
 
-# Timestamp at the start of every log line (short-iso format from journalctl)
-_RE_TIMESTAMP = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+\-]\d{4})\s")
-
-# Inline timestamp inside the AIOStreams log message (UTC)
-_RE_INLINE_TS = re.compile(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s*UTC")
-
-# Stream request: CORE | Handling stream request type=series id=tt11198220:2:2
-_RE_STREAM_REQ = re.compile(
-    r"CORE\s*\|\s*Handling stream request\s+type=(\w+)\s+id=(tt\d+(?::\d+:\d+)?)"
+# journalctl short-iso prefix: "<iso-ts> <host> <ident[pid]>: <rest>".
+# Captures the full-date timestamp and the remaining payload (pino line or
+# indented continuation field). The identifier segment has no colon, so
+# "[^:]*:" reliably consumes up to the single colon after "corepack[1712]".
+_RE_PREFIX = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})T\d{2}:\d{2}:\d{2}"
+    r"(?P<off>[+\-]\d{2}:?\d{2})\s+\S+\s+[^:]*:\s?(?P<rest>.*)$"
 )
 
-# Addon scrape summary header (success or failure)
-_RE_SCRAPE_HEADER = re.compile(
-    r"SCRAPER\s*\|.*?\[(.*?)\]\s*Scrape Summary"
+# pino header line: "[HH:MM:SS.mmm] LEVEL: message"
+_RE_PINO = re.compile(
+    r"^\[(?P<t>\d{2}:\d{2}:\d{2}\.\d+)\]\s+(?P<level>[A-Z]+):\s?(?P<msg>.*)$"
 )
 
-# Scrape status line
-_RE_SCRAPE_STATUS = re.compile(
-    r"SCRAPER\s*\|.*?Status\s*:\s*(SUCCESS|FAILED)"
+# Indented pino continuation field: "    key: value"
+_RE_CONT = re.compile(r"^\s+(?P<key>[A-Za-z_][\w]*):\s?(?P<val>.*)$")
+
+# "Handling stream request for <Source>"
+_HANDLING_PREFIX = "Handling stream request for "
+
+# "Completed search for <Name> in <n>ms"
+_RE_COMPLETED = re.compile(
+    r"^Completed search for\s+(?P<name>.+?)\s+in\s+(?P<v>[\d.]+)(?P<u>ms|s)\b"
 )
 
-# Scrape streams count
-_RE_SCRAPE_STREAMS = re.compile(
-    r"SCRAPER\s*\|.*?Streams\s*:\s*(\d+)"
+# "Applied basic filters in <n>ms, removed <k> streams"
+_RE_FILTER = re.compile(
+    r"^Applied basic filters in\s+(?P<v>[\d.]+)(?P<u>ms|s)"
+    r"(?:,\s*removed\s+(?P<removed>\d+)\s+streams)?"
 )
 
-# Scrape time (seconds or ms)
-_RE_SCRAPE_TIME = re.compile(
-    r"SCRAPER\s*\|.*?Time\s*:\s*([\d.]+)(ms|s)"
+# "<Something> search for <query> took <n>ms" (e.g. Knaben)
+_RE_SEARCH_TOOK = re.compile(
+    r"search for\s+.+\s+took\s+(?P<v>[\d.]+)(?P<u>ms|s)\b"
 )
-
-# Scrape error
-_RE_SCRAPE_ERROR = re.compile(
-    r"SCRAPER\s*\|.*?Error\s*:\s*(.+)"
-)
-
-# Wrapper errors: WRAPPERS | Failed to fetch stream resource for X: reason
-_RE_WRAPPER_ERROR = re.compile(
-    r"WRAPPERS\s*\|\s*Failed to fetch stream resource for\s+(.*?):\s*(.*)"
-)
-
-# Final result: CORE | Returning X streams and Y errors
-_RE_RETURNING = re.compile(
-    r"CORE\s*\|\s*Returning\s+(\d+)\s+streams?\s+and\s+(\d+)\s+errors?"
-)
-
-# HTTP request line with response code and latency
-_RE_HTTP = re.compile(
-    r"HTTP\s*\|.*?(GET|POST|PUT|DELETE|PATCH)\s+(/\S+).*?Response:\s*(\d+)\s*-\s*([\d.]+)ms"
-)
-
-# Content ID from stremio stream path
-_RE_CONTENT_PATH = re.compile(
-    r"/stream/(\w+)/(tt\d+(?::\d+:\d+)?)(?:\.json)?"
-)
-
-# Pipeline lines: FILTERER, DEDUPLICATOR, SORTER with timing/counts
-_RE_PIPELINE = re.compile(
-    r"(FILTERER|DEDUPLICATOR|SORTER)\s*\|.*?(\d+).*?([\d.]+)(ms|s)"
-)
-
-
-def _parse_journalctl_ts(ts_str: str) -> str | None:
-    """Normalize a journalctl short-iso timestamp to ISO format."""
-    if not ts_str:
-        return None
-    # journalctl short-iso: 2026-03-28T22:47:08+0000
-    return ts_str.replace("+0000", "+00:00").replace("-0000", "+00:00")
-
-
-def _parse_inline_ts(ts_str: str) -> str | None:
-    """Normalize an inline UTC timestamp to ISO format."""
-    if not ts_str:
-        return None
-    # "2026-03-28 22:47:08.943" -> "2026-03-28T22:47:08Z"
-    parts = ts_str.strip().split(".")
-    return f"{parts[0].replace(' ', 'T')}Z"
 
 
 def _time_to_seconds(value: str, unit: str) -> float:
@@ -103,12 +74,81 @@ def _time_to_seconds(value: str, unit: str) -> float:
     return v / 1000.0 if unit == "ms" else v
 
 
+def _unquote(val: str | None) -> str | None:
+    """Strip surrounding double-quotes from a pino field value."""
+    if val is None:
+        return None
+    val = val.strip()
+    if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
+        return val[1:-1]
+    return val
+
+
+def _to_int(val: str | None) -> int:
+    try:
+        return int(str(val).strip())
+    except (ValueError, TypeError):
+        return 0
+
+
+def _norm_error(msg: str) -> str:
+    """Normalize an error message into a stable-ish aggregation key."""
+    key = msg.split("\n", 1)[0].strip().rstrip(":")
+    return key[:160]
+
+
+class _Record:
+    """A single pino log event: header + its continuation fields."""
+
+    __slots__ = ("level", "msg", "ts", "fields")
+
+    def __init__(self, level: str, msg: str, ts: str | None) -> None:
+        self.level = level
+        self.msg = msg
+        self.ts = ts
+        self.fields: dict[str, str] = {}
+
+
+def _iter_records(lines: list[str]):
+    """Yield _Record objects from raw journalctl+pino lines."""
+    cur: _Record | None = None
+    for line in lines:
+        pm = _RE_PREFIX.match(line)
+        if pm:
+            rest = pm.group("rest")
+            date = pm.group("date")
+            off = pm.group("off")
+        else:
+            # No journalctl prefix (e.g. running against a plain log file).
+            rest = line
+            date = None
+            off = ""
+
+        hm = _RE_PINO.match(rest)
+        if hm:
+            if cur is not None:
+                yield cur
+            ts = None
+            if date is not None:
+                ts = f"{date}T{hm.group('t')}{off}"
+            cur = _Record(hm.group("level"), hm.group("msg").rstrip(), ts)
+            continue
+
+        if cur is not None:
+            cm = _RE_CONT.match(rest)
+            if cm:
+                cur.fields.setdefault(cm.group("key"), cm.group("val").rstrip())
+
+    if cur is not None:
+        yield cur
+
+
 def _parse_logs(lines: list[str]) -> dict:
-    """Parse AIOStreams log lines into structured analysis data."""
-    # Tracking state
-    requests: list[dict] = []
-    current_request: dict | None = None
-    current_addon: dict | None = None
+    """Parse AIOStreams (pino) log lines into structured analysis data."""
+    # requests keyed by requestId (falls back to a per-timestamp key)
+    requests: dict[str, dict] = {}
+    request_order: list[str] = []
+
     addon_stats: dict[str, dict] = defaultdict(
         lambda: {
             "calls": 0,
@@ -119,155 +159,143 @@ def _parse_logs(lines: list[str]) -> dict:
         }
     )
     error_counts: dict[str, int] = defaultdict(int)
-    http_requests: list[dict] = []
     pipeline_steps: list[dict] = []
     all_timestamps: list[str] = []
 
-    for line in lines:
-        # Extract timestamp
-        ts_match = _RE_INLINE_TS.search(line)
-        ts = _parse_inline_ts(ts_match.group(1)) if ts_match else None
-        if not ts:
-            jctl_ts = _RE_TIMESTAMP.match(line)
-            ts = _parse_journalctl_ts(jctl_ts.group(1)) if jctl_ts else None
+    # (ts, streams, is_error, time_s) events attributed to the active request
+    timeline: list[tuple[str, int, bool, float | None]] = []
+
+    for rec in _iter_records(lines):
+        msg = rec.msg
+        fields = rec.fields
+        ts = rec.ts
         if ts:
             all_timestamps.append(ts)
 
-        # Stream request start
-        m = _RE_STREAM_REQ.search(line)
+        # 1. Stream request fan-out (one line per queried source)
+        if msg.startswith(_HANDLING_PREFIX):
+            src = msg[len(_HANDLING_PREFIX):].strip()
+            rid = _unquote(fields.get("requestId"))
+            rtype = _unquote(fields.get("requestType")) or "unknown"
+            key = rid or f"noid@{ts or len(request_order)}"
+            req = requests.get(key)
+            if req is None:
+                req = {
+                    "content_id": rid or "-",
+                    "type": rtype,
+                    "timestamp": ts,
+                    "addons": [],
+                    "total_streams": 0,
+                    "total_errors": 0,
+                    "duration_s": None,
+                    "_start": ts or "",
+                }
+                requests[key] = req
+                request_order.append(key)
+            elif req["type"] == "unknown" and rtype != "unknown":
+                req["type"] = rtype
+            req["addons"].append(
+                {"name": src, "status": "success", "streams": 0, "time_s": None, "error": None}
+            )
+            addon_stats[src]["calls"] += 1
+            continue
+
+        # 2. Completed search for <Name> in <n>ms (+ results field)
+        m = _RE_COMPLETED.match(msg)
         if m:
-            # Save previous request if it exists
-            if current_request is not None:
-                requests.append(current_request)
-            current_request = {
-                "timestamp": ts,
-                "type": m.group(1),
-                "content_id": m.group(2),
-                "addons": [],
-                "total_streams": 0,
-                "total_errors": 0,
-                "duration_s": None,
-            }
-            current_addon = None
+            name = m.group("name").strip()
+            t = _time_to_seconds(m.group("v"), m.group("u"))
+            results = _to_int(fields.get("results"))
+            a = addon_stats[name]
+            a["calls"] += 1
+            a["successes"] += 1
+            a["times"].append(t)
+            a["streams"].append(results)
+            if ts:
+                timeline.append((ts, results, False, t))
             continue
 
-        # Addon scrape header
-        m = _RE_SCRAPE_HEADER.search(line)
+        # 3. addon fetch failed (fields: addon, took ms)
+        if msg == "addon fetch failed":
+            name = _unquote(fields.get("addon")) or "unknown"
+            a = addon_stats[name]
+            a["calls"] += 1
+            a["failures"] += 1
+            tsec: float | None = None
+            took = fields.get("took")
+            if took is not None:
+                try:
+                    tsec = float(took) / 1000.0
+                    a["times"].append(tsec)
+                except ValueError:
+                    tsec = None
+            error_counts[f"addon fetch failed: {name}"] += 1
+            if ts:
+                timeline.append((ts, 0, True, tsec))
+            continue
+
+        # 4. addon returned error streams (fields: addon)
+        if msg == "addon returned error streams":
+            name = _unquote(fields.get("addon")) or "unknown"
+            a = addon_stats[name]
+            a["calls"] += 1
+            a["failures"] += 1
+            error_counts[f"addon returned error streams: {name}"] += 1
+            if ts:
+                timeline.append((ts, 0, True, None))
+            continue
+
+        # 5. Applied basic filters in <n>ms, removed <k> streams -> pipeline
+        m = _RE_FILTER.match(msg)
         if m:
-            addon_name = m.group(1).strip()
-            current_addon = {
-                "name": addon_name,
-                "status": None,
-                "streams": 0,
-                "time_s": None,
-                "error": None,
-            }
-            addon_stats[addon_name]["calls"] += 1
+            t = _time_to_seconds(m.group("v"), m.group("u"))
+            pipeline_steps.append(
+                {"stage": "FILTERER", "count": _to_int(m.group("removed")), "time_s": round(t, 4)}
+            )
             continue
 
-        # Scrape status
-        m = _RE_SCRAPE_STATUS.search(line)
-        if m and current_addon:
-            status = m.group(1)
-            current_addon["status"] = status.lower()
-            addon_name = current_addon["name"]
-            if status == "SUCCESS":
-                addon_stats[addon_name]["successes"] += 1
-            else:
-                addon_stats[addon_name]["failures"] += 1
-            continue
-
-        # Scrape streams count
-        m = _RE_SCRAPE_STREAMS.search(line)
-        if m and current_addon:
-            count = int(m.group(1))
-            current_addon["streams"] = count
-            addon_stats[current_addon["name"]]["streams"].append(count)
-            continue
-
-        # Scrape time
-        m = _RE_SCRAPE_TIME.search(line)
-        if m and current_addon:
-            time_s = _time_to_seconds(m.group(1), m.group(2))
-            current_addon["time_s"] = round(time_s, 3)
-            addon_stats[current_addon["name"]]["times"].append(time_s)
-            # When we have time, the addon block is complete — attach to request
-            if current_request is not None:
-                current_request["addons"].append(current_addon)
-            current_addon = None
-            continue
-
-        # Scrape error
-        m = _RE_SCRAPE_ERROR.search(line)
-        if m and current_addon:
-            error_msg = m.group(1).strip()
-            current_addon["error"] = error_msg
-            error_counts[error_msg] += 1
-            continue
-
-        # Wrapper errors
-        m = _RE_WRAPPER_ERROR.search(line)
+        # 6. "<engine> search for <query> took <n>ms" -> pipeline SEARCH
+        m = _RE_SEARCH_TOOK.search(msg)
         if m:
-            addon_name = m.group(1).strip()
-            error_msg = m.group(2).strip()
-            error_counts[error_msg] += 1
+            t = _time_to_seconds(m.group("v"), m.group("u"))
+            pipeline_steps.append({"stage": "SEARCH", "count": 0, "time_s": round(t, 4)})
             continue
 
-        # Final returning line
-        m = _RE_RETURNING.search(line)
-        if m and current_request is not None:
-            current_request["total_streams"] = int(m.group(1))
-            current_request["total_errors"] = int(m.group(2))
+        # 7. Everything else at ERROR/FATAL (and error-ish WARN) -> error tally
+        if rec.level in ("ERROR", "FATAL"):
+            error_counts[_norm_error(msg)] += 1
+            if ts:
+                timeline.append((ts, 0, True, None))
             continue
 
-        # HTTP request/response
-        m = _RE_HTTP.search(line)
-        if m:
-            path = m.group(2)
-            content_match = _RE_CONTENT_PATH.search(path)
-            latency_ms = float(m.group(4))
-            http_entry = {
-                "timestamp": ts,
-                "method": m.group(1),
-                "path": path,
-                "status_code": int(m.group(3)),
-                "latency_ms": round(latency_ms, 1),
-                "content_id": content_match.group(2) if content_match else None,
-            }
-            http_requests.append(http_entry)
-            # Use HTTP latency as request duration if we have a matching request
-            if current_request is not None and content_match:
-                current_request["duration_s"] = round(latency_ms / 1000.0, 3)
-            continue
+    # ── Second pass: attribute timeline events to the active request ─────────
+    ordered = [
+        (requests[k]["_start"], k) for k in request_order if requests[k]["_start"]
+    ]
+    ordered.sort()
+    starts = [s for s, _ in ordered]
+    keys = [k for _, k in ordered]
+    if starts:
+        import bisect
 
-        # Pipeline steps
-        m = _RE_PIPELINE.search(line)
-        if m:
-            pipeline_steps.append({
-                "stage": m.group(1),
-                "count": int(m.group(2)),
-                "time_s": round(_time_to_seconds(m.group(3), m.group(4)), 4),
-            })
-            continue
+        for ev_ts, streams, is_err, t_s in timeline:
+            idx = bisect.bisect_right(starts, ev_ts) - 1
+            if idx < 0:
+                continue
+            req = requests[keys[idx]]
+            if streams:
+                req["total_streams"] += streams
+            if is_err:
+                req["total_errors"] += 1
+            if t_s is not None:
+                req["duration_s"] = round(max(req["duration_s"] or 0.0, t_s), 3)
 
-    # Finalize last request
-    if current_request is not None:
-        requests.append(current_request)
+    # ── Build request list (chronological), drop internal fields ─────────────
+    req_list = sorted(requests.values(), key=lambda r: r["_start"])
+    for r in req_list:
+        r.pop("_start", None)
 
-    # Compute duration from addon times if not set from HTTP response
-    for req in requests:
-        if req["duration_s"] is None and req["addons"]:
-            addon_times = [a["time_s"] for a in req["addons"] if a["time_s"] is not None]
-            if addon_times:
-                req["duration_s"] = round(max(addon_times), 2)
-
-    # Build time range
-    time_range = {
-        "start": all_timestamps[0] if all_timestamps else None,
-        "end": all_timestamps[-1] if all_timestamps else None,
-    }
-
-    # Build addon summary
+    # ── Addon summary ────────────────────────────────────────────────────────
     addons_summary: dict[str, dict] = {}
     for name, stats in addon_stats.items():
         calls = stats["calls"]
@@ -285,20 +313,13 @@ def _parse_logs(lines: list[str]) -> dict:
             "total_streams": sum(streams),
         }
 
-    # Build overall summary
-    total_requests = len(requests)
-    all_durations = [
-        r["duration_s"] for r in requests if r["duration_s"] is not None
-    ]
-    all_stream_counts = [r["total_streams"] for r in requests]
-    total_addon_errors = sum(error_counts.values())
-
+    # ── Overall summary ──────────────────────────────────────────────────────
+    all_durations = [r["duration_s"] for r in req_list if r["duration_s"] is not None]
+    all_stream_counts = [r["total_streams"] for r in req_list]
     summary = {
-        "total_requests": total_requests,
+        "total_requests": len(req_list),
         "avg_response_time_s": (
-            round(sum(all_durations) / len(all_durations), 2)
-            if all_durations
-            else None
+            round(sum(all_durations) / len(all_durations), 2) if all_durations else None
         ),
         "avg_streams": (
             round(sum(all_stream_counts) / len(all_stream_counts), 1)
@@ -307,7 +328,12 @@ def _parse_logs(lines: list[str]) -> dict:
         ),
         "fastest_s": round(min(all_durations), 2) if all_durations else None,
         "slowest_s": round(max(all_durations), 2) if all_durations else None,
-        "total_addon_errors": total_addon_errors,
+        "total_addon_errors": sum(error_counts.values()),
+    }
+
+    time_range = {
+        "start": all_timestamps[0] if all_timestamps else None,
+        "end": all_timestamps[-1] if all_timestamps else None,
     }
 
     return {
@@ -316,9 +342,9 @@ def _parse_logs(lines: list[str]) -> dict:
         "summary": summary,
         "addons": addons_summary,
         "errors": dict(error_counts),
-        "recent_requests": requests[-50:],  # last 50 requests
-        "pipeline": pipeline_steps[-100:],  # last 100 pipeline entries
-        "http_requests": http_requests[-100:],  # last 100 HTTP entries
+        "recent_requests": req_list[-50:],
+        "pipeline": pipeline_steps[-100:],
+        "http_requests": [],  # new pino logs carry no HTTP status/latency
     }
 
 
@@ -328,41 +354,39 @@ def _parse_logs(lines: list[str]) -> dict:
 async def api_aiostreams_analyze(request: Request) -> JSONResponse:
     """Fetch and parse AIOStreams journalctl logs into structured analysis."""
     try:
-        n = str(min(int(request.query_params.get("n", "5000")), 50000))
+        n = str(max(1, min(int(request.query_params.get("n", "5000")), 50000)))
     except (ValueError, TypeError):
         n = "5000"
 
+    unit = cfg.SERVICES.get("aiostreams", {}).get("unit", "aiostreams")
+
     try:
-        p = await asyncio.create_subprocess_exec(
-            "sudo",
-            "journalctl",
-            "-u",
-            "aiostreams",
-            "-n",
-            n,
-            "--no-pager",
-            "--output=short-iso",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        result = await run_command(
+            [
+                "sudo",
+                "journalctl",
+                "-u",
+                unit,
+                "-n",
+                n,
+                "--no-pager",
+                "--output=short-iso",
+            ],
+            timeout=30,
         )
-        out, err = await asyncio.wait_for(p.communicate(), timeout=30)
-        raw = out.decode(errors="replace")
-        lines = raw.splitlines()
-
-        if not lines and err:
-            return JSONResponse(
-                {"error": f"journalctl: {err.decode(errors='replace').strip()[:300]}"},
-                status_code=500,
-            )
-
-        result = _parse_logs(lines)
-        return JSONResponse(result)
-
-    except TimeoutError:
+    except CommandTimeoutError:
         return JSONResponse({"error": "timeout reading logs"}, status_code=504)
     except Exception as e:
         logger.exception("AIOStreams analyze failed")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+    lines = result.stdout.splitlines()
+    if not lines and result.stderr:
+        return JSONResponse(
+            {"error": f"journalctl: {result.stderr.strip()[:300]}"}, status_code=500
+        )
+
+    return JSONResponse(_parse_logs(lines))
 
 
 # ── API: Test stream lookup ──────────────────────────────────────────────────

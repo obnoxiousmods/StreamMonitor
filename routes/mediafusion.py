@@ -14,6 +14,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 import core.config as cfg
+from core.process import CommandTimeoutError, run_command
 
 logger = logging.getLogger(__name__)
 
@@ -675,26 +676,18 @@ async def api_mediafusion_analyze(request: Request) -> JSONResponse:
         cmd += ["-n", n]
 
     try:
-        p = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await asyncio.wait_for(p.communicate(), timeout=120 if use_all else 45)
-        raw = out.decode(errors="replace")
-        lines = raw.splitlines()
-
-        if not lines and err:
-            return JSONResponse(
-                {"error": f"journalctl: {err.decode(errors='replace').strip()[:300]}"},
-                status_code=500,
-            )
-
-        result = _parse_scrapy_logs(lines)
-        return JSONResponse(result)
-
-    except TimeoutError:
+        proc = await run_command(cmd, timeout=120 if use_all else 45)
+    except CommandTimeoutError:
         return JSONResponse({"error": "timeout reading logs"}, status_code=504)
     except Exception as e:
         logger.exception("MediaFusion analyze failed")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+    lines = proc.stdout.splitlines()
+    if not lines and proc.stderr:
+        return JSONResponse(
+            {"error": f"journalctl: {proc.stderr.strip()[:300]}"},
+            status_code=500,
+        )
+
+    return JSONResponse(_parse_scrapy_logs(lines))

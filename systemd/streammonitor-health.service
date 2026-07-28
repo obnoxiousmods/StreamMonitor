@@ -1,0 +1,17 @@
+[Unit]
+Description=StreamMonitor health check / recovery
+After=streammonitor.service
+StartLimitIntervalSec=5min
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+TimeoutStartSec=25
+ExecStart=/bin/sh -c '\
+  URL="http://127.0.0.1:9090/api/ping"; \
+  for i in 1 2; do \
+    curl -fsS --max-time 5 "$URL" >/dev/null 2>&1 && exit 0; \
+    sleep 5; \
+  done; \
+  echo "StreamMonitor health check failed; restarting service"; \
+  systemctl restart streammonitor.service'

@@ -1,0 +1,62 @@
+[Unit]
+Description=StreamMonitor - Streaming Stack Health Monitor
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=streammonitor
+Group=media
+WorkingDirectory=/home/streammonitor/streammonitor
+Environment=PYTHONUNBUFFERED=1
+
+# Ensure the virtual environment matches uv.lock before starting.
+# This is idempotent and fast when the venv is already up to date.
+ExecStartPre=/bin/sh -c 'cd /home/streammonitor/streammonitor && uv sync --frozen --no-dev'
+
+# Wait until the port is free so a stale crash doesn't race the restart.
+ExecStartPre=/bin/sh -c 'for i in 1 2 3 4 5; do ! ss -H -tln "sport = :9090" | grep -q LISTEN && exit 0; sleep 1; done; exit 0'
+
+ExecStart=uv run --no-dev uvicorn app:app --host 127.0.0.1 --port 9090 --log-level info
+
+Restart=always
+RestartSec=5
+
+# Give the app time to bind before considering the start failed.
+TimeoutStartSec=30
+
+UMask=0002
+
+# Hardening (compatible with sudo-based service control/journal reading).
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectSystem=full
+ReadWritePaths=/home/streammonitor/streammonitor/data /home/streammonitor/streammonitor/logs /home/streammonitor/streammonitor/.cache /tmp
+ProtectClock=true
+ProtectHostname=true
+# ProtectProc relaxed from invisible: Process Explorer needs /proc visibility into other users' processes
+ProtectProc=default
+# CAP_SYS_PTRACE + CAP_DAC_READ_SEARCH: Process Explorer needs both to map sockets -> pid for
+# processes owned by other users (ptrace alone maps ~16 of ~5350; DAC_READ_SEARCH gets the rest).
+# NOTE: DAC_READ_SEARCH bypasses standard file read/search permission checks system-wide —
+# a much bigger grant than ProtectProc/ptrace alone. User explicitly signed off on this trade.
+AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+
+RemoveIPC=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+
+# sudo needs setuid, so we cannot use NoNewPrivileges=true.
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=streammonitor
+
+[Install]
+WantedBy=multi-user.target

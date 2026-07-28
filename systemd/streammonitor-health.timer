@@ -1,0 +1,12 @@
+[Unit]
+Description=Run StreamMonitor health check every minute
+
+[Timer]
+Unit=streammonitor-health.service
+OnBootSec=1min
+OnUnitInactiveSec=1min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

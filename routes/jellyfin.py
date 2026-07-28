@@ -50,9 +50,9 @@ async def api_jellyfin(request: Request):
     activity = []
 
     if not cfg.JELLYFIN_URL:
-        errors["config"] = _diag("JELLYFIN_URL is not configured")
+        errors["config_url"] = _diag("JELLYFIN_URL is not configured")
     if not cfg.JELLYFIN_KEY:
-        errors["config"] = _diag("JELLYFIN_API_KEY is not configured")
+        errors["config_key"] = _diag("JELLYFIN_API_KEY is not configured")
 
     if configured:
         headers = {"X-Emby-Token": cfg.JELLYFIN_KEY}

@@ -57,6 +57,78 @@ const status = Object.fromEntries(
   ]),
 )
 
+const publicConfig = {
+  categories: {
+    system: 'System',
+    streaming: 'Streaming',
+    media: 'Media',
+    automation: 'Automation',
+  },
+  speedtest: {
+    direct_url: 'https://speedtest.obby.ca/speedtest/download',
+    direct_name: 'Direct',
+    cf_url: 'https://speedtest.obnoxious.lol/speedtest/download',
+    cf_name: 'Cloudflare',
+  },
+}
+
+const publicStatus = (() => {
+  const summaries = Object.fromEntries(
+    Object.entries(status).map(([id, service], index) => [
+      id,
+      {
+        id,
+        name: service.current.name,
+        ok: service.current.ok,
+        latency_ms: service.current.latency_ms,
+        category: service.current.category,
+        history: service.history,
+        availability_pct: index === 2 ? 83.3 : 98.5 - index * 0.7,
+        updated_at: '2026-04-21T19:00:50Z',
+      },
+    ]),
+  )
+
+  return {
+    services: summaries,
+    categories: {
+      streaming: {
+        id: 'streaming',
+        label: 'Streaming',
+        total: 3,
+        up: 2,
+        down: 1,
+        availability_pct: 93.4,
+        services: ['comet', 'mediafusion', 'aiostreams'],
+      },
+      media: {
+        id: 'media',
+        label: 'Media',
+        total: 1,
+        up: 1,
+        down: 0,
+        availability_pct: 98.9,
+        services: ['jellyfin'],
+      },
+      automation: {
+        id: 'automation',
+        label: 'Automation',
+        total: 1,
+        up: 1,
+        down: 0,
+        availability_pct: 99.2,
+        services: ['prowlarr'],
+      },
+    },
+    total: 5,
+    up: 4,
+    down: 1,
+    availability_pct: 95.4,
+    updated_at: '2026-04-21T19:00:50Z',
+    window_minutes: 30,
+  }
+})()
+
 const systemStats = {
   cpu: {
     model: 'AMD Ryzen Threadripper PRO 7975WX 32-Cores',
@@ -413,11 +485,26 @@ const mediaFusionAnalysis = {
   time_range: { start: '2026-04-18T12:00:00Z', end: '2026-04-18T18:50:00Z' },
 }
 
-test.beforeEach(async ({ page }) => {
-  await mockApi(page)
+test('public landing page exposes theme controls and live status responsively', async ({ page }, testInfo) => {
+  await mockApi(page, { authenticated: false })
+
+  await page.goto('/')
+  await expect(page.getByText('Public ops surface')).toBeVisible()
+  await expect(page.getByText('Category overview')).toBeVisible()
+  await assertResponsive(page, `public-home:${testInfo.project.name}`)
+
+  await page.getByRole('combobox', { name: 'Theme' }).click()
+  await page.getByRole('option', { name: 'Mint' }).click()
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.accentTheme)).toBe('mint')
+
+  await page.reload()
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.accentTheme)).toBe('mint')
+  await expect(page.getByText('Admin sign-in')).toBeVisible()
+  await assertResponsive(page, `public-login-surface:${testInfo.project.name}`)
 })
 
 test('dashboard fits every responsive viewport across tabs', async ({ page }, testInfo) => {
+  await mockApi(page)
   await page.goto('/')
   await expect(page.getByText('StreamMonitor').first()).toBeVisible()
   await assertResponsive(page, `initial:${testInfo.project.name}`)
@@ -446,6 +533,7 @@ test('dashboard fits every responsive viewport across tabs', async ({ page }, te
 })
 
 test('service diagnostic panels render structured views responsively', async ({ page }, testInfo) => {
+  await mockApi(page)
   await page.goto('/')
 
   await page
@@ -479,20 +567,19 @@ test('service diagnostic panels render structured views responsively', async ({ 
   await assertResponsive(page, `mediafusion-scraper:${testInfo.project.name}`)
 })
 
-async function mockApi(page: Page) {
+async function mockApi(page: Page, options?: { authenticated?: boolean }) {
+  const authenticated = options?.authenticated ?? true
+
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname
 
-    if (path === '/api/auth/session') return json(route, { authenticated: true, user: 'admin' })
+    if (path === '/api/auth/session') return json(route, { authenticated, user: authenticated ? 'admin' : null })
+    if (path === '/api/public-config') return json(route, publicConfig)
+    if (path === '/api/public') return json(route, publicStatus)
     if (path === '/api/bootstrap') {
       return json(route, {
-        categories: {
-          system: 'System',
-          streaming: 'Streaming',
-          media: 'Media',
-          automation: 'Automation',
-        },
+        categories: publicConfig.categories,
         web_urls: Object.fromEntries(Object.entries(services).map(([id, service]) => [id, service.web_url])),
         bench_titles: {
           tt0468569: 'The Dark Knight',
@@ -501,12 +588,7 @@ async function mockApi(page: Page) {
         },
         services,
         log_units: logUnits,
-        speedtest: {
-          direct_url: 'https://speedtest.obby.ca/speedtest/download',
-          direct_name: 'Direct',
-          cf_url: 'https://speedtest.obnoxious.lol/speedtest/download',
-          cf_name: 'Cloudflare',
-        },
+        speedtest: publicConfig.speedtest,
       })
     }
     if (path === '/api/status') return json(route, status)

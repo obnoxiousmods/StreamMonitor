@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 import grp
 import pwd
 import stat
 from pathlib import Path
 
+from core.process import run_command
+
 # (label, path, expected_user, expected_group, expected_mode_octal, group_section)
 SCAN_TARGETS: list[tuple[str, str, str, str, int, str]] = [
     # ── Streaming services ────────────────────────────────────────────────────
     ("Comet", "/home/comet/comet", "comet", "media", 0o774, "Streaming"),
-    ("StreamMonitor", "/home/comet/streammonitor", "comet", "media", 0o774, "Streaming"),
+    ("StreamMonitor", "/home/streammonitor/streammonitor", "streammonitor", "media", 0o774, "Streaming"),
     ("MediaFusion", "/home/mediafusion/MediaFusion", "mediafusion", "media", 0o774, "Streaming"),
     ("StremThru", "/home/stremthru", "stremthru", "media", 0o774, "Streaming"),
     ("Zilean", "/home/zilean", "zilean", "media", 0o774, "Streaming"),
@@ -142,33 +143,17 @@ async def apply_fix(path: str, user: str, group: str, mode: str, recursive: bool
     """chown then chmod via sudo."""
     flags = ["-R"] if recursive else []
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "sudo",
-            "chown",
-            *flags,
-            f"{user}:{group}",
-            path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+        res = await run_command(
+            ["sudo", "chown", *flags, f"{user}:{group}", path], timeout=30
         )
-        _, err = await asyncio.wait_for(proc.communicate(), timeout=30)
-        if proc.returncode != 0:
-            return {"path": path, "ok": False, "error": f"chown: {err.decode().strip()[:120]}"}
+        if res.returncode != 0:
+            return {"path": path, "ok": False, "error": f"chown: {res.stderr.strip()[:120]}"}
     except Exception as e:
         return {"path": path, "ok": False, "error": f"chown: {e}"}
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "sudo",
-            "chmod",
-            *flags,
-            mode,
-            path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, err = await asyncio.wait_for(proc.communicate(), timeout=30)
-        if proc.returncode != 0:
-            return {"path": path, "ok": False, "error": f"chmod: {err.decode().strip()[:120]}"}
+        res = await run_command(["sudo", "chmod", *flags, mode, path], timeout=30)
+        if res.returncode != 0:
+            return {"path": path, "ok": False, "error": f"chmod: {res.stderr.strip()[:120]}"}
     except Exception as e:
         return {"path": path, "ok": False, "error": f"chmod: {e}"}
     return {"path": path, "ok": True}
